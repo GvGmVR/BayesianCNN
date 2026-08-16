@@ -1,4 +1,22 @@
-//ram_bank.v
+//==============================================================================
+// Module: ram_bank.v
+// Project: Bayesian CNN (BayesCNN) Hardware Accelerator
+// Stage: 1 - Memory Subsystem (Primitive)
+//------------------------------------------------------------------------------
+// Purpose:
+//   Synchronous Simple Dual-Port on-chip Block RAM (BRAM) primitive.
+//
+// Architectural Inputs:
+//   - Port A (Write): 8-bit Data word, row address, and write enable from DMA Ingress.
+//   - Port B (Read) : Row address and read enable from Read Address Generator (RAG).
+//
+// Architectural Outputs:
+//   - Port B: 8-bit registered data word output to compute datapath.
+//
+// Description:
+//   Provides independent read/write ports to support concurrent background 
+//   DRAM burst loading and foreground PE compute access.
+//==============================================================================
 
 `include "bcnn_pkg.vh"
 
