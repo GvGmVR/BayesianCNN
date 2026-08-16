@@ -1,7 +1,7 @@
 `timescale 1ns/1ps
 `include "bcnn_pkg.vh"
 
-module tb_stage_1_top.v;
+module tb_stage_1_top;
 
     reg clk,rst_n;
 
@@ -139,7 +139,7 @@ module tb_stage_1_top.v;
             while (!dram_ready) @(posedge clk);
             dram_valid =1;
             for (c=0;c<`PC;c=c+1)begin 
-                dram_data_in[(c*`8)+: 8] = ((p*10)+c) & 8'hFF; 
+                dram_data_in[(c*8)+: 8] = ((p*10)+c) & 8'hFF; 
             end
         end
 

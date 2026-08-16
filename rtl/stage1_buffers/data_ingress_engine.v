@@ -89,7 +89,7 @@ module data_ingress_engine #(
             w_tile_cnt <= {TILE_CNT_WIDTH{1'b0}};
             h_cnt <= {DIM_WIDTH{1'b0}};
             l_cnt <= {DIM_WIDTH{1'b0}};
-        end esle begin
+        end else begin
             case(state)
                 STATE_IDLE: begin
                     if(start_ingress)begin

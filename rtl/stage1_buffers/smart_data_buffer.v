@@ -60,7 +60,7 @@ module smart_data_buffer #(
     output wire re_b_valid,
     output wire window_done,
     output wire layer_done,
-    output wire [(PF*PV*PC*DATA_WIDTH)-1:0] pe_data_out,
+    output wire [(PF*PV*PC*DATA_WIDTH)-1:0] pe_data_out
 );
 
     //ingress write wires
@@ -128,13 +128,13 @@ module smart_data_buffer #(
         .W(W),
         .C_tiles(C_tiles),
         .W_tiles(W_tiles),
-        L_frames(Lframes),
+        .L_frames(L_frames),
         .dram_ready(dram_ready),
         .dram_valid(dram_valid),
         .dram_data_in(dram_data_in),
         .we_a(ing_we_a),
         .addr_a(ing_addr_a),
-        .din_a(ing_din_a),
+        .din_a(ing_din_a)
     );
 
     // Read address generator - Port B read side

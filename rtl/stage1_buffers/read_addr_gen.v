@@ -115,8 +115,8 @@ module read_addr_gen#(
                     if(c_tile_cnt == (C_tiles -1'b1))begin 
                         c_tile_cnt <= {TILE_CNT_WIDTH{1'b0}};
                         if(kw_cnt == (KW -1'b1))begin 
-                            kw_cnt <= {KERNEL_DIM_WIDTH{1'b0}}
-                            if(kh_cnt == (KH-1'b1))begin 
+                            kw_cnt <= {KERNEL_DIM_WIDTH{1'b0}};
+                            if(kh_cnt == (KH-1'b1)) begin 
                                 kh_cnt <= {KERNEL_DIM_WIDTH{1'b0}};
                                 if((!mode_3d)||(kl== (KL-1'b1)))begin 
                                     kl_cnt <= {KERNEL_DIM_WIDTH{1'b0}};

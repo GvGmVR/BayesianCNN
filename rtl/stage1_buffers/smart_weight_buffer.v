@@ -69,7 +69,7 @@ module smart_weight_buffer #(
     endgenerate
 
     // Tree fanout PV times
-    gevar v;
+    genvar v;
     generate
         for(v=0;v<PV;v=v+1)begin: GEN_WEIGHT_PV_FANOUT
             assign pe_weight_out[(v+1)*(PC*PF*DATA_WIDTH)-1: (v)*(PC*PF*DATA_WIDTH)] = raw_weight_out;

@@ -20,10 +20,10 @@
 
 `include "bcnn_pkg.vh"
 
-module ram#(
+module ram_bank#(
     parameter DATA_WIDTH = `DATA_WIDTH,
     parameter RAM_DEPTH = `RAM_DEPTH,
-    parameter ADDR_WIDTH = `ADDR_WIDTH,
+    parameter ADDR_WIDTH = `ADDR_WIDTH
 )(
     input wire clk,
     input wire rst_n,
