@@ -23,7 +23,7 @@
 module ram#(
     parameter DATA_WIDTH = `DATA_WIDTH,
     parameter RAM_DEPTH = `RAM_DEPTH,
-    parameter ADDR_WIDTH = `ADDR_WIDTH
+    parameter ADDR_WIDTH = `ADDR_WIDTH,
 )(
     input wire clk,
     input wire rst_n,

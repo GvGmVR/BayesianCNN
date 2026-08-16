@@ -19,7 +19,7 @@ module tb_stage_1_top.v;
     
     
     reg start_ingress, dram_valid,dram_ready;
-    reg [(1PC*`DAT_WIDTH)-1:0] dram_data_in;
+    reg [(`PC*`DATA_WIDTH)-1:0] dram_data_in;
     wire ingress_don;
     
     reg start_compute;
