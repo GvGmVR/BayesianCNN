@@ -17,7 +17,7 @@
 
 `define DATA_WIDTH 8
 `define RAM_DEPTH 1024
-`define ADDR_WIDTH = 10 // $clog2(RAM_DEPTH=1024)
+`define ADDR_WIDTH 10 // $clog2(RAM_DEPTH=1024)
 
 `define PC 64 
 `define PV 1
