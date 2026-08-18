@@ -95,9 +95,9 @@ module smart_data_buffer #(
 
     //Ping-Pong routing
     assign ping_we_a = (ping_pong_sel==1'b0) ? ing_we_a : {(PV*PC){1'b0}};     // Write ping
-    assign ping_addr_a = (ping_pong_sel==1'b0) ? ing_addr_a : {ADDR_WIDTH-1{1'b0}};
+    assign ping_addr_a = (ping_pong_sel==1'b0) ? ing_addr_a : {ADDR_WIDTH{1'b0}};
     assign ping_din_a = (ping_pong_sel==1'b0) ? ing_din_a : {(PV*PC*DATA_WIDTH){1'b0}};
-    assign ping_addr_b = (ping_pong_sel==1'b1) ? rag_addr_b : {ADDR_WIDTH-1{1'b0}};     /// Read pong
+    assign ping_addr_b = (ping_pong_sel==1'b1) ? rag_addr_b : {ADDR_WIDTH{1'b0}};     /// Read pong
     assign ping_re_b = (ping_pong_sel==1'b1) ? rag_re_b : 1'b0;
 
     assign pong_we_a = (ping_pong_sel == 1'b1) ? ing_we_a   : {(PV*PC){1'b0}};  // Write pong
@@ -121,7 +121,7 @@ module smart_data_buffer #(
     ) u_engine (
         .clk(clk),
         .rst_n(rst_n),
-        .start_ingress(start_compute),
+        .start_ingress(start_ingress),
         .ingress_busy(ingress_busy),
         .ingress_done(ingress_done),
         .H(H),

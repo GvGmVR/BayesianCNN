@@ -77,7 +77,7 @@ module data_ingress_engine #(
     assign calc_row_addr = (((l_cnt * H + h_cnt) * W_tiles + w_tile_cnt) * C_tiles) + c_tile_cnt;
 
     always @(posedge clk or negedge rst_n) begin
-        if(rst_n) begin 
+        if(!rst_n) begin 
             state <= STATE_IDLE;
             ingress_busy <= 1'b0;
             ingress_done <= 1'b0;
@@ -106,7 +106,7 @@ module data_ingress_engine #(
                     if(dram_valid && dram_ready) begin
                         addr_a <= calc_row_addr;
                         we_a <= {(PV*PC){1'b1}};
-                        din_a <= dram_data_in;
+                        din_a <= {PV{dram_data_in}};
 
                         if (c_tile_cnt == (C_tiles - 1'b1)) begin
                             c_tile_cnt <= {TILE_CNT_WIDTH{1'b0}};

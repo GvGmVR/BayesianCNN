@@ -6,8 +6,8 @@ iverilog -I rtl -g2005-sv -o sim/stage1/stage1_sim.out rtl/stage1_buffers/ram_ba
 
 ** Execute simulation(vvp)
 
-vvp sim/stage1_sim.out
+vvp sim/stage1/stage1_sim.out
 
 ** View Signals in GTKWave
 
-gtkwave sim/stage1_simulation.vcd
+gtkwave sim/stage1/stage1_simulation.vcd

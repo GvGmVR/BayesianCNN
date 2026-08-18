@@ -29,14 +29,7 @@ module crossbar_switch #(
 
     output reg [(PC*PV*DATA_WIDTH)-1:0] aligned_data
 );
-
-always @(posedge clk or negedge rst_n) begin
-    if(!rst_n) begin
-        aligned_data <= {(PC*PV*DATA_WIDTH){1'b0}};
-    end
-    else if(enable) begin
-        aligned_data <= raw_bank_data;
-    end
-end
+    // No clock based - no delay
+    assign aligned_data = enable ? raw_bank_data : {(PV * PC * DATA_WIDTH){1'b0}};
 
 endmodule

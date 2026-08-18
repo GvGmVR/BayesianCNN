@@ -18,9 +18,10 @@ module tb_stage_1_top;
     reg[`STRIDE_WIDTH-1:0] stride;
     
     
-    reg start_ingress, dram_valid,dram_ready;
+    reg start_ingress, dram_valid;
+    wire dram_ready;
     reg [(`PC*`DATA_WIDTH)-1:0] dram_data_in;
-    wire ingress_don;
+    wire ingress_done;
     
     reg start_compute;
     wire re_b_valid, window_done, layer_done;
@@ -92,6 +93,13 @@ module tb_stage_1_top;
     integer p,c,f,error_count;
     reg [`DATA_WIDTH-1:0] expected_val;
 
+    // catch onfinite loops
+    initial begin
+        #100000; // 10,000 ns timeout limit
+        $display("\n[ERROR] Simulation timed out! signal conditions was never met.");
+        $finish;
+    end
+
     initial begin
         // Setup VCD Waveform Dump for GTKWave
         $dumpfile("sim/stage1/stage1_simulation.vcd");
@@ -135,15 +143,14 @@ module tb_stage_1_top;
 
         // Stream 16 spatial pixels (4x4), each with 64 distinct channel values
         for (p=0;p<16;p=p+1)begin 
-            @(posedge clk);
-            while (!dram_ready) @(posedge clk);
             dram_valid =1;
             for (c=0;c<`PC;c=c+1)begin 
                 dram_data_in[(c*8)+: 8] = ((p*10)+c) & 8'hFF; 
             end
+            @(posedge clk);
+            while (!dram_ready) @(posedge clk);
         end
 
-        @(posedge clk);
         dram_valid =0;
 
         while(!ingress_done)@(posedge clk);
@@ -151,7 +158,7 @@ module tb_stage_1_top;
 
         // Test case 2 - RAG Read Execution from PING Buffer
         @(posedge clk);
-        ping_pong_sel = 0; // Read from ping buffer
+        ping_pong_sel = 1; // Read from ping buffer
         start_compute = 1;
         @(posedge clk);
         start_compute = 0;
@@ -191,7 +198,7 @@ module tb_stage_1_top;
         @(posedge clk);
         #1;
 
-        if(pe_weight_out[7:0]!==8'd0)begin 
+        if(pe_weight_out[7:0]!==8'd5)begin 
             $display("[ERROR] Weight Pop Mismatch! Expected 5, Got %d", pe_weight_out[7:0]);
             error_count = error_count + 1;
         end else begin 
