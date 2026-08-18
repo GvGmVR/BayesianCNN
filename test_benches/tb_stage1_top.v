@@ -93,7 +93,7 @@ module tb_stage_1_top;
     integer p,c,f,error_count;
     reg [`DATA_WIDTH-1:0] expected_val;
 
-    // catch onfinite loops
+    // catch infinite loops
     initial begin
         #100000; // 10,000 ns timeout limit
         $display("\n[ERROR] Simulation timed out! signal conditions was never met.");

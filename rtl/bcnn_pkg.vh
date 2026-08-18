@@ -15,6 +15,7 @@
 `ifndef BCN_PKG_VH
 `define BCN_PKG_VH
 
+// Stage 1
 `define DATA_WIDTH 8
 `define RAM_DEPTH 1024
 `define ADDR_WIDTH 10 // $clog2(RAM_DEPTH=1024)
@@ -29,5 +30,16 @@
 `define STRIDE_WIDTH  3      // Width for Stride
 
 `define FIFO_DEPTH 512
+
+// Stage 2
+`define LFSR_WIDTH 128
+`define LFSI_TAP1 127 / 4-Tap Polynomial: x^128 + x^126 + x^125 + x^120 + 1
+`define LFSR_TAP2 126
+`define LFSR_TAP3 125
+`define LFSR_TAP4 120
+`define N_LFSR 1  // 50 PERCENT PROB
+`define SIPO_CNT_WIDTH 6  // count till 64
+`define MASK_FIFO_DEPTH 64 
+`define MASK_FIFO_ADDR 6  // 2^d addresses in MASK_FIFO
 
 `endif
