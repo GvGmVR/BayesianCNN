@@ -74,7 +74,7 @@ module read_addr_gen#(
     assign w_in_tile = (w_in/PV);
 
     wire [ADDR_WIDTH-1:0] calc_read_addr;
-    assign calc_read_addr = (((l_in*H + h_in)*W_tiles+w__in_tile)*C_tiles)+c_cnt;
+    assign calc_read_addr = (((l_in*H + h_in)*W_tiles+w_in_tile)*C_tiles)+c_tile_cnt;
 
     always @(posedge clk or negedge rst_n) begin
         if(!rst_n)begin
@@ -102,7 +102,7 @@ module read_addr_gen#(
                         kh_cnt <= {KERNEL_DIM_WIDTH{1'b0}};
                         kl_cnt <= {KERNEL_DIM_WIDTH{1'b0}};
                         h_cnt <= {DIM_WIDTH{1'b0}};
-                        STATE <= STATE_READ;
+                        state <= STATE_READ;
                         re_b <= 1'b1;
                     end
                 end
@@ -118,11 +118,11 @@ module read_addr_gen#(
                             kw_cnt <= {KERNEL_DIM_WIDTH{1'b0}};
                             if(kh_cnt == (KH-1'b1)) begin 
                                 kh_cnt <= {KERNEL_DIM_WIDTH{1'b0}};
-                                if((!mode_3d)||(kl== (KL-1'b1)))begin 
+                                if((!mode_3d)||(kl_cnt == (KL-1'b1)))begin 
                                     kl_cnt <= {KERNEL_DIM_WIDTH{1'b0}};
                                     window_done <= 1'b1;
                                     if(w_tile_cnt == (W_tiles -1'b1))begin 
-                                        w_tile_cnt <= {TILE_CNT_WDTH{1'b0}};
+                                        w_tile_cnt <= {TILE_CNT_WIDTH{1'b0}};
                                         if(h_cnt == (H-1'b1))begin 
                                             h_cnt <={DIM_WIDTH{1'b0}};
                                             state <= STATE_DONE;

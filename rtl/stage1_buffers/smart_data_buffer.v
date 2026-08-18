@@ -95,9 +95,9 @@ module smart_data_buffer #(
 
     //Ping-Pong routing
     assign ping_we_a = (ping_pong_sel==1'b0) ? ing_we_a : {(PV*PC){1'b0}};     // Write ping
-    assign ping_addr_a = (ping_pong_sel==1'b0) ? ing_addr_a : {ADDR_DITH-1{1'b0}};
+    assign ping_addr_a = (ping_pong_sel==1'b0) ? ing_addr_a : {ADDR_WIDTH-1{1'b0}};
     assign ping_din_a = (ping_pong_sel==1'b0) ? ing_din_a : {(PV*PC*DATA_WIDTH){1'b0}};
-    assign ping_addr_b = (ping_pong_sel==1'b1) ? rag_addr_b : {ADDR_DITH-1{1'b0}};     /// Read pong
+    assign ping_addr_b = (ping_pong_sel==1'b1) ? rag_addr_b : {ADDR_WIDTH-1{1'b0}};     /// Read pong
     assign ping_re_b = (ping_pong_sel==1'b1) ? rag_re_b : 1'b0;
 
     assign pong_we_a = (ping_pong_sel == 1'b1) ? ing_we_a   : {(PV*PC){1'b0}};  // Write pong
@@ -107,7 +107,7 @@ module smart_data_buffer #(
     assign pong_re_b = (ping_pong_sel == 1'b0) ? rag_re_b   : 1'b0;
 
     assign raw_ram_out = (ping_pong_sel == 1'b1) ? ping_dout_b : pong_dout_b;
-    assign re_b_valid = rag_e_b;
+    assign re_b_valid = rag_re_b;
 
 
     // Data ingress engine - Port A write side
@@ -213,7 +213,7 @@ module smart_data_buffer #(
         .rst_n(rst_n),
         .enable(rag_re_b),
         .raw_bank_data(raw_ram_out),
-        .aligned_data(aligned_ram_data)
+        .aligned_data(aligned_ram_out)
     );
 
     // Tree Fan-Out
@@ -223,7 +223,7 @@ module smart_data_buffer #(
         .PV(PV),
         .PF(PF)
     ) u_fanout (
-        .data_in(aligned_ram_data),
+        .data_in(aligned_ram_out),
         .data_out(pe_data_out)
     );
 

@@ -26,8 +26,8 @@ module tb_stage_1_top;
     wire re_b_valid, window_done, layer_done;
     wire [(`PF*`PC*`PV*`DATA_WIDTH)-1:0] pe_data_out;
 
-    reg weights_push;
-    reg [(`PC*`PF*`DATA_WIDTH)-1:0] weights_din;
+    reg weight_push;
+    reg [(`PC*`PF*`DATA_WIDTH)-1:0] weight_din;
     reg weight_pop;
     wire weight_full, weight_empty;
     wire [(`PV*`PC*`PF*`DATA_WIDTH)-1:0] pe_weight_out;
@@ -95,7 +95,7 @@ module tb_stage_1_top;
     initial begin
         // Setup VCD Waveform Dump for GTKWave
         $dumpfile("sim/stage1/stage1_simulation.vcd");
-        $dumpvars(0, tb_stage1_top);
+        $dumpvars(0, tb_stage_1_top);
 
         clk = 0;
         rst_n = 0;
@@ -105,7 +105,7 @@ module tb_stage_1_top;
         dram_valid = 0;
         dram_data_in = 0;
         start_compute = 0;
-        weights_push = 0;
+        weight_push = 0;
         weight_din = 0;
         weight_pop = 0;
 
@@ -178,7 +178,7 @@ module tb_stage_1_top;
 
         // Push 4 weight sets (each set contains 64 channels x 64 filters = 4096 bytes)
         for (f=0;f<(`PC*`PF);f=f+1)begin 
-            weight_din[f*8+:8] = f & 8'hFF; 
+            weight_din[f*8+:8] = (f+5) & 8'hFF; 
         end
 
         @(posedge clk);

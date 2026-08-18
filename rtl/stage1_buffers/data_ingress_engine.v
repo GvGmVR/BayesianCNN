@@ -104,7 +104,7 @@ module data_ingress_engine #(
                 end
                 STATE_WRITE: begin
                     if(dram_valid && dram_ready) begin
-                        addr_a <= calculated_row_addr;
+                        addr_a <= calc_row_addr;
                         we_a <= {(PV*PC){1'b1}};
                         din_a <= dram_data_in;
 

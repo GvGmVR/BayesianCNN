@@ -33,7 +33,7 @@ module smart_weight_buffer #(
     // ingress from DRAM
     input wire weight_push,
     input wire [(PC*PF*DATA_WIDTH)-1:0] weight_din,
-    input wire weight_full,
+    output wire weight_full,
 
     // Weight usage - From PE controller
     input wire weight_pop,
@@ -72,7 +72,7 @@ module smart_weight_buffer #(
     genvar v;
     generate
         for(v=0;v<PV;v=v+1)begin: GEN_WEIGHT_PV_FANOUT
-            assign pe_weight_out[(v+1)*(PC*PF*DATA_WIDTH)-1: (v)*(PC*PF*DATA_WIDTH)] = raw_weight_out;
+            assign pe_weight_out[(v+1)*(PC*PF*DATA_WIDTH)-1: (v)*(PC*PF*DATA_WIDTH)] = raw_weight_bus;
         end
     endgenerate
 

@@ -35,7 +35,7 @@ module weight_fifo #(
     output wire empty
 );
 
-    reg [DATA_WIDTH-1:0] MEM [FIFO_DEPTH-1:0];
+    reg [DATA_WIDTH-1:0] mem [FIFO_DEPTH-1:0];
     reg [ADDR_WIDTH-1:0] wr_ptr;
     reg [ADDR_WIDTH-1:0] rd_ptr;
     reg [ADDR_WIDTH:0] count;
@@ -47,7 +47,7 @@ module weight_fifo #(
         if(!rst_n)begin 
             wr_ptr <= {ADDR_WIDTH{1'b0}};
             rd_ptr <= {ADDR_WIDTH{1'b0}};
-            count <= {(ADDR_WIDTH+1),1'b0};
+            count <= {(ADDR_WIDTH+1){1'b0}};
             dout <= {DATA_WIDTH{1'b0}};
         end else begin 
             //Push operation
