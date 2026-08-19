@@ -30,9 +30,31 @@ module sipo_shift_reg #(
     input clk,rst_n,shift_en,bit_in,
 
     output re[PF-1:0] parallel_mask,
-    
+    output reg word_valid
 );
+    reg [PF-1:0] shift_reg;
+    reg [CNT_WIDTH-1:0] bit_cnt;
 
+    always@(posedge clk or negedge rst_n)begin
+        if(!rst_n)begin
+            shift_reg <= {PF{1'b0}};
+            bit_cnt <= {CNT_WIDTH{1'b0}};
+            parallel_mask <= {PF{1'b0}};
+            word_valid <= 1'b0;
+        end else if(shift_en) begin 
+            shift_reg <= {shift_reg[PF-2], bit_in};
 
+            if(bit_cnt == (PF-1'b1))begin 
+                bit_cnt <= {CNT_WIDTH{1'b0}};
+                parallel_mask <= {shift_reg[PF-2], bit_in};
+                word_valid <= 1'b1;
+            end else begin 
+                bit_cnt <= bit_cnt + 1'b1
+                word_valid <= 1'b0;
+            end 
+        end else begin 
+            word_valid <= 1'b0;
+        end
+    end
 
 endmodule
