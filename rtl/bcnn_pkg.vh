@@ -40,6 +40,6 @@
 `define N_LFSR 1  // 50 PERCENT PROB
 `define SIPO_CNT_WIDTH 6  // count till 64
 `define MASK_FIFO_DEPTH 64 
-`define MASK_FIFO_ADDR 6  // 2^d addresses in MASK_FIFO
+`define MASK_FIFO_ADDR 6  // 2^6 addresses in MASK_FIFO
 
 `endif
