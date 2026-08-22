@@ -33,7 +33,7 @@ module mask_fifo #(
     output wire full,
 
     input wire pop,
-    input reg [DATA_WIDTH-1:0] dout,
+    output reg [DATA_WIDTH-1:0] dout,
     output wire empty,
     output wire [ADDR_WIDTH:0] occupancy 
 );

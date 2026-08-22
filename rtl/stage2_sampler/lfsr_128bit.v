@@ -45,11 +45,14 @@ module lfsr_128bit #(
     assign lfsr_bit_out = r_state[LFSR_WIDTH-1];
     assign lfsr_state_out = r_state;
 
+    // Change as per need like - //{1'b1,{(LFSR_WIDTH-2){1'b0}},1'b1};
+    localparam [127:0] DEFAULT_SEED = 128'hACE1_BEEF_CAFE_1234_5678_9ABC_DEF0_1357;
+
     always @(posedge clk or negedge rst_n) begin
         if(!rst_n) begin
-            r_state <= {{(LFSR_WIDTH-1){1'b0},1'b1}};
+            r_state <= DEFAULT_SEED; 
         end else if(load_seed) begin 
-            r_state <= (|seed_in) ? seed_in : {{(LFSR_WIDTH-1){1'b0},1'b1}};
+            r_state <= (|seed_in) ? seed_in : DEFAULT_SEED; 
         end else if (en) begin 
             r_state <= {r_state[LFSR_WIDTH-2:0],feedback_bit}; // Left or |right
         end

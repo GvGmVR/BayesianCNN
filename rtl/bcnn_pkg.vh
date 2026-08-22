@@ -33,10 +33,10 @@
 
 // Stage 2
 `define LFSR_WIDTH 128
-`define LFSI_TAP1 127 / 4-Tap Polynomial: x^128 + x^126 + x^125 + x^120 + 1
-`define LFSR_TAP2 126
-`define LFSR_TAP3 125
-`define LFSR_TAP4 120
+`define LFSR_TAP1 127 // 4-Tap Polynomial: x^128 + x^126 + x^125 + x^120 + 1 - in paper
+`define LFSR_TAP2 125 
+`define LFSR_TAP3 100 // Polynomial used here: // Primitive Polynomial: x^128 + x^126 + x^101 + x^99 + 1
+`define LFSR_TAP4 98
 `define N_LFSR 1  // 50 PERCENT PROB
 `define SIPO_CNT_WIDTH 6  // count till 64
 `define MASK_FIFO_DEPTH 64 
