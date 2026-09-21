@@ -42,4 +42,12 @@
 `define MASK_FIFO_DEPTH 64 
 `define MASK_FIFO_ADDR 6  // 2^6 addresses in MASK_FIFO
 
+//stage 3
+`define MULT_OUT_WIDTH 16
+`define ADDR_TREE_WIDTH 22  // 16 bit + log2(64)
+`define ACCUM_WIDTH 32
+`define QUANT_SCALE_WIDTH 16   // 16-bit fixed-point quantization scale multiplier
+`define QUANT_SHIFT_WIDTH 5
+`define QUANT_BIAS_WIDTH 32  
+
 `endif
