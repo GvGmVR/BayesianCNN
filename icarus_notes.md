@@ -19,3 +19,10 @@ iverilog -I rtl -g2005-sv -o sim/stage2/stage2_sim.out rtl/stage2_sampler/lfsr_1
 vvp sim/stage2/stage2_sim.out
 
 gtkwave sim/stage2/stage2_simulation.vcd
+
+/* Stage 3:
+iverilog -I rtl -g2005-sv -o sim/stage3/stage3_sim.out rtl/stage3_pe_array/multiplier_array.v rtl/stage3_pe_array/adder_tree.v rtl/stage3_pe_array/mac_unit.v rtl/stage3_pe_array/accumulator_32bit.v rtl/stage3_pe_array/linear_quantizer.v rtl/stage3_pe_array/relu_unit.v rtl/stage3_pe_array/processing_unit.v rtl/stage3_pe_array/processing_engine.v test_benches/tb_processing_engine.v
+
+vvp sim/stage3/stage3_sim.out
+
+gtkwave sim/stage3/stage3_simulation.vcd

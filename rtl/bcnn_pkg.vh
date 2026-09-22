@@ -43,6 +43,7 @@
 `define MASK_FIFO_ADDR 6  // 2^6 addresses in MASK_FIFO
 
 //stage 3
+`define LOG2_PC 6  // $clog2(PC) -> log2(64) = 6 levels
 `define MULT_OUT_WIDTH 16
 `define ADDR_TREE_WIDTH 22  // 16 bit + log2(64)
 `define ACCUM_WIDTH 32

@@ -31,7 +31,7 @@ module relu_unit #(
 
     always@(posedge clk or negedge rst_n) begin 
         if(!rst_n) begin 
-            data_in <= {DATA_WIDTH{1'b0}};
+            data_out <= {DATA_WIDTH{1'b0}};
         end else begin 
             if(relu_en && data_in[DATA_WIDTH-1]) begin 
                 data_out <= {DATA_WIDTH{1'b0}};
