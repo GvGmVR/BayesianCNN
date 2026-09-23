@@ -51,4 +51,12 @@
 `define QUANT_SHIFT_WIDTH 5
 `define QUANT_BIAS_WIDTH 32  
 
+//Stage 4
+`define POOL_MODE_WIDTH 2    // 2-bit mode: 00=Bypass, 01=Max Pool, 10=Avg Pool
+`define POOL_MODE_BYPASS 2'b00
+`define POOL_MODE_MAX 2'b01
+`define POOL_MODE_AVG 2'b10
+`define POOL_WIN_SIZE 4    // 2x2 spatial pooling window (4 pixels)
+`define POOL_CNT_WIDTH 2   // $clog2(POOL_WIN_SIZE) = 2 bits (0 to 3)
+
 `endif
