@@ -44,4 +44,39 @@ module sc_addition_unit #(
     output reg valid_out
 );
 
+    localparam signed [DATA_WIDTH-1:0] INT_MAX = {1'b0,{(DATA_WIDTH-1){1'b1}}}; // +127
+    localparam signed [DATA_WIDTH-1:0] INT_MIN = {1'b1,{(DATA_WIDTH-1){1'b0}}}; // -128
+
+    wire signed [(PF*PV*DATA_WIDTH)-1:0] added_bus;
+
+    genvar f;
+    generate 
+        for(f=0;f<(PF*PV);f=f+1) begin: GEN_SC_ADDERS 
+            wire signed [DATA_WIDTH-1:0] conv_val;
+            wire signed [DATA_WIDTH-1:0] sc_val;
+            wire signed [DATA_WIDTH:0] raw_sum;
+
+            assign conv_val = conv_features_in[(f+1)*DATA_WIDTH-1: F*DATA_WIDTH];
+            assign sc_val = sc_features_in[(f+1)*DATA_WIDTH-1: F*DATA_WIDTH];
+            assign raw_sum = conv_val+sc_val;
+
+            //symmetric saturation
+            wire signed [DATA_WIDTH-1:0] clamped_sum;
+            assign clamped_sum = (raw_sum > $signed({{1'b0},INT_MAX})) ? INT_MAX: (raw_sum < $signed({{1'b1},INT_MIN})) ? INT_MIN : raw_sum[DATA_WIDTH-1:0];
+        
+            //If sc_en=1 apply sum, else pass conv_val unaltered
+            assign added_bus[(f+1)*DATA_WIDTH-1: f*DATA_WIDTH] = sc_en ? clamped_sum : conv_val;
+        end
+    endgenerate
+
+    always @(posedge clk or negedge rst_n) begin
+        if(!rst_n) begin 
+            sc_features_out <= {(PF*PV*DATA_WIDTH){1'b0}};
+            valid_out <= 1'b0;
+        end else begin 
+            sc_features_out <= added_bus;
+            valid_out <= valid_in;
+        end
+    end
+    
 endmodule
