@@ -26,3 +26,11 @@ iverilog -I rtl -g2005-sv -o sim/stage3/stage3_sim.out rtl/stage3_pe_array/multi
 vvp sim/stage3/stage3_sim.out
 
 gtkwave sim/stage3/stage3_simulation.vcd
+
+/* Stage 4:
+
+iverilog -I rtl -g2005-sv -o sim/stage4/stage4_sim.out rtl/stage2_sampler/lfsr_128bit.v rtl/stage2_sampler/sipo_shift_reg.v rtl/stage2_sampler/mask_fifo.v rtl/stage2_sampler/bernoulli_sampler.v rtl/stage4_functional/sc_addition_unit.v rtl/stage4_functional/pooling_unit_2d.v rtl/stage4_functional/dropout_engine.v rtl/stage4_functional/functional_engine.v test_benches/tb_functional_engine.v
+
+vvp sim/stage4/stage4_sim.out
+
+gtkwave sim/stage4/stage4_simulation.vcd
