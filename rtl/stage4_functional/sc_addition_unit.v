@@ -23,7 +23,7 @@
 //   clamping to [INT_MIN, INT_MAX] to prevent 8-bit signed overflow.
 //==============================================================================
 
-`include "bcnn_pkg.vh"
+`include "../bcnn_pkg.vh"
 
 module sc_addition_unit #(
     parameter DATA_WIDTH = `DATA_WIDTH,

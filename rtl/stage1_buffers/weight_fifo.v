@@ -17,7 +17,7 @@
 //   Buffers filter weights and provides steady streaming to the MAC arrays.
 //==============================================================================
 
-`include "bcnn_pkg.vh"
+`include "../bcnn_pkg.vh"
 
 module weight_fifo #(
     parameter DATA_WIDTH = `DATA_WIDTH,

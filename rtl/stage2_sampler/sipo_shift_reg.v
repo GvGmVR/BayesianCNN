@@ -21,7 +21,7 @@
 //   assembled word into parallel_mask and fires word_valid to push into FIFO.
 //==============================================================================
 
-`include "bcnn_pkg.vh"
+`include "../bcnn_pkg.vh"
 
 module sipo_shift_reg #(
     parameter PF            = `PF,

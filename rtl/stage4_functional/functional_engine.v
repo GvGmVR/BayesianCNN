@@ -30,7 +30,7 @@
 //   fully pipelined post-processing datapath with zero intra-stage bubbles.
 //==============================================================================
 
-`include "bcnn_pkg.vh"
+`include "../bcnn_pkg.vh"
 
 module functional_engine #(
     parameter DATA_WIDTH = `DATA_WIDTH,
@@ -44,7 +44,7 @@ module functional_engine #(
 
     input wire [POOL_MODE_WIDTH-1:0] pool_mode,
     input wire pool_win_done,
-    input wire [POOL_CNT_WIDTH] pool_step,
+    input wire [POOL_CNT_WIDTH-1:0] pool_step,
     input wire mcd_en,
 
     input  wire [(PF * PV * DATA_WIDTH)-1:0] conv_features_in,

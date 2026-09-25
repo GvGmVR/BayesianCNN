@@ -20,7 +20,7 @@
 //   allowing masks to be pre-generated with zero compute stall cycles.
 //==============================================================================
 
-`include "bcnn_pkg.vh"
+`include "../bcnn_pkg.vh"
 
 module mask_fifo #(
     parameter DATA_WIDTH = `PF,

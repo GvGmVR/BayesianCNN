@@ -1,5 +1,5 @@
 `timescale 1ns/1ps
-`include "bcnn_pkg.vh"
+`include "../bcnn_pkg.vh"
 
 module tb_stage_1_top;
 

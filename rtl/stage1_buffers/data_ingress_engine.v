@@ -26,7 +26,7 @@ frame
 */
 //==============================================================================
 
-`include "bcnn_pkg.vh"
+`include "../bcnn_pkg.vh"
 
 
 module data_ingress_engine #(

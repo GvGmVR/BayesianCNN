@@ -25,7 +25,7 @@
 //   channel where mask_in[f] == 0. If mcd_en is 0, features pass through unaltered.
 //==============================================================================
 
-`include "bcnn_pkg.vh"
+`include "../bcnn_pkg.vh"
 
 module dropout_engine #(
     parameter DATA_WIDTH = `DATA_WIDTH,

@@ -18,7 +18,7 @@
 //   FPGA DSP blocks via dual-multiplier DSP packing.
 //==============================================================================
 
-`include "bcnn_pkg.vh"
+`include "../bcnn_pkg.vh"
 
 module multiplier_array #(
     parameter DATA_WIDTH = `DATA_WIDTH,

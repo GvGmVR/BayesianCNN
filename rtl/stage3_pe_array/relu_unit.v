@@ -19,7 +19,7 @@
 //   forced to zero. If relu_en is 0, data_in passes through unaltered.
 //==============================================================================
 
-`include "bcnn_pkg.vh"
+`include "../bcnn_pkg.vh"
 
 module relu_unit #(
     parameter DATA_WIDTH = `DATA_WIDTH

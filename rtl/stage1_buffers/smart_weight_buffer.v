@@ -19,7 +19,7 @@
 //   lanes to feed the 2D MAC array in 1 clock cycle.
 //==============================================================================
 
-`include "bcnn_pkg.vh"
+`include "../bcnn_pkg.vh"
 
 module smart_weight_buffer #(
     parameter DATA_WIDTH = `DATA_WIDTH,

@@ -17,7 +17,7 @@
 //   units simultaneously with zero-latency combinational fan-out.
 //==============================================================================
 
-`include "bcnn_pkg.vh"
+`include "../bcnn_pkg.vh"
 
 module tree_fanout #(
     parameter DATA_WIDTH = `DATA_WIDTH,

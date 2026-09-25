@@ -21,7 +21,7 @@
 //   2^128 - 1 states (~1500 years at 220 MHz), ensuring zero noise correlation.
 //==============================================================================
 
-`include "bcnn_pkg.vh"
+`include "../bcnn_pkg.vh"
 
 module lfsr_128bit #(
     parameter LFSR_WIDTH = `LFSR_WIDTH,

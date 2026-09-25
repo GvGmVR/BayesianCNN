@@ -24,7 +24,7 @@
 //   derived directly from DATA_WIDTH with zero hardcoded bit constants.
 //==============================================================================
 
-`include "bcnn_pkg.vh"
+`include "../bcnn_pkg.vh"
 
 module linear_quantizer #(
     parameter DATA_WIDTH = `DATA_WIDTH,

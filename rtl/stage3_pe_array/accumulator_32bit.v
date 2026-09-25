@@ -23,7 +23,7 @@
 //   state to 0 for the next spatial window.
 //==============================================================================
 
-`include "bcnn_pkg.vh"
+`include "../bcnn_pkg.vh"
 
 module accumulator_32bit #(
     parameter ACCUM_WIDTH = `ACCUM_WIDTH,

@@ -20,7 +20,7 @@
 //   window pixels every clock cycle without host CPU intervention.
 //==============================================================================
 
-`include "bcnn_pkg.vh"
+`include "../bcnn_pkg.vh"
 
 module read_addr_gen#(
     parameter ADDR_WIDTH       = `ADDR_WIDTH,

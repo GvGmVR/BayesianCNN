@@ -16,7 +16,7 @@
 //   Provides spatial alignment across vector groups during sliding-window shifts.
 //==============================================================================
 
-`include "bcnn_pkg.vh"
+`include "../bcnn_pkg.vh"
 
 module crossbar_switch #(
     parameter DATA_WIDTH = `DATA_WIDTH,

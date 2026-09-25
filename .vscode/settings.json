@@ -1,0 +1,10 @@
+{
+    "python.defaultInterpreterPath": "${workspaceFolder}/venv/Scripts/python.exe",
+    
+    "teroshdl.general.pythonPath": "E:/COLLEGE/FYP/BCNN_Accelerator/venv/Scripts/python.exe",
+    
+    "teroshdl.schematic.backend": "yowasp",
+    "teroshdl.schematic.installationPath": "E:/COLLEGE/FYP/BCNN_Accelerator/venv/Scripts",
+    
+    "teroshdl.schematic.extraArguments": "-I E:/COLLEGE/FYP/BCNN_Accelerator/rtl"
+}

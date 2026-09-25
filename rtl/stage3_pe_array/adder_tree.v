@@ -17,7 +17,7 @@
 //   the bit-width grows by +1 to guarantee zero arithmetic overflow.
 //==============================================================================
 
-`include "bcnn_pkg.vh"
+`include "../bcnn_pkg.vh"
 
 module adder_tree #(
     parameter PC = `PC,

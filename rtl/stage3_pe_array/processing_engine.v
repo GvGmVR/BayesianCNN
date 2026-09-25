@@ -27,7 +27,7 @@
 //   4,096 INT8 multiplications and 64 complete filter convolutions simultaneously.
 //==============================================================================
 
-`include "bcnn_pkg.vh"
+`include "../bcnn_pkg.vh"
 
 module processing_engine #(
     parameter DATA_WIDTH = `DATA_WIDTH,

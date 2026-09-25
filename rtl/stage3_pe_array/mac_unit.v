@@ -21,7 +21,7 @@
 //   sum to ensure high clock timing closure.
 //==============================================================================
 
-`include "bcnn_pkg.vh"
+`include "../bcnn_pkg.vh"
 
 module mac_unit #(
     parameter DATA_WIDTH = `DATA_WIDTH,

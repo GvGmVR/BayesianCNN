@@ -27,7 +27,7 @@
 //   into a unified single-filter processing element (Section III-A2, Fig. 4).
 //==============================================================================
 
-`include "bcnn_pkg.vh"
+`include "../bcnn_pkg.vh"
 
 module processing_unit #(
     parameter DATA_WIDTH = `DATA_WIDTH,

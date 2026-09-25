@@ -18,7 +18,7 @@
 //   DRAM burst loading and foreground PE compute access.
 //==============================================================================
 
-`include "bcnn_pkg.vh"
+`include "../bcnn_pkg.vh"
 
 module ram_bank#(
     parameter DATA_WIDTH = `DATA_WIDTH,

@@ -19,7 +19,7 @@
 //   PV x PC RAM banks to provide stall-free Ping-Pong double buffering.
 //==============================================================================
 
-`include "bcnn_pkg.vh"
+`include "../bcnn_pkg.vh"
 
 module smart_data_buffer #(
     parameter DATA_WIDTH       = `DATA_WIDTH,

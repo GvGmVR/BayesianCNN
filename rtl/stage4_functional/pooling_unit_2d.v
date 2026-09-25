@@ -23,7 +23,7 @@
 //   accumulates 4 pixels and divides by 4 (arithmetic shift right by 2).
 //==============================================================================
 
-`include "bcnn_pkg.vh"
+`include "../bcnn_pkg.vh"
 
 module pooling_unit_2d #(
     parameter DATA_WIDTH = `DATA_WIDTH,

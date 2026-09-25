@@ -21,7 +21,7 @@
 //   in the background, overlapping noise generation with convolution compute.
 //==============================================================================
 
-`include "bcnn_pkg.vh"
+`include "../bcnn_pkg.vh"
 
 module bernoulli_sampler #(
     parameter PF            = `PF,
