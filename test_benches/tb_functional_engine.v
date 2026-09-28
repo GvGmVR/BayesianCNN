@@ -187,7 +187,7 @@ module tb_functional_engine;
         // Step 1: Pixel = 45
         @(posedge clk);
         for (f = 0; f < `PF; f = f + 1) conv_features_in[f*8 +: 8] = 8'sd45;
-        pool_step = 2'd2;
+        pool_step = 2'd1;
 
         // Step 2: Pixel = 30
         @(posedge clk);

@@ -56,8 +56,8 @@ module sc_addition_unit #(
             wire signed [DATA_WIDTH-1:0] sc_val;
             wire signed [DATA_WIDTH:0] raw_sum;
 
-            assign conv_val = conv_features_in[(f+1)*DATA_WIDTH-1: F*DATA_WIDTH];
-            assign sc_val = sc_features_in[(f+1)*DATA_WIDTH-1: F*DATA_WIDTH];
+            assign conv_val = conv_features_in[(f+1)*DATA_WIDTH-1: f*DATA_WIDTH];
+            assign sc_val = sc_features_in[(f+1)*DATA_WIDTH-1: f*DATA_WIDTH];
             assign raw_sum = conv_val+sc_val;
 
             //symmetric saturation

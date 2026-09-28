@@ -1,5 +1,5 @@
 //==============================================================================
-// Package: bcnn_pkg.vh
+// Package: ../bcnn_pkg.vh
 // Project: Bayesian CNN (BayesCNN) Hardware Accelerator
 // Target Architecture: Intel Arria 10 / Xilinx UltraScale FPGA
 //------------------------------------------------------------------------------

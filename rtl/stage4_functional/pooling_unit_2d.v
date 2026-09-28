@@ -51,14 +51,14 @@ module pooling_unit_2d #(
      reg signed [DATA_WIDTH-1:0] max_regs [(PF*PV)-1:0];
      reg signed [(DATA_WIDTH + POOL_CNT_WIDTH)-1:0] sum_regs [(PF*PV)-1:0];
 
-    genvar i;
-    always @(posedge clk or negedge clk) begin 
+    integer i;
+    always @(posedge clk or negedge rst_n) begin 
         if(!rst_n) begin 
             pooled_features <= {(PF*PV*DATA_WIDTH){1'b0}};
             valid_out <= 1'b0;
             for (i=0;i<(PF*PV); i=i+1) begin 
                 max_regs[i] <= INT_MIN;
-                sum_regs <= {(DATA_WIDTH + POOL_CNT_WIDTH){1'b0}};
+                sum_regs[i] <= {(DATA_WIDTH + POOL_CNT_WIDTH){1'b0}};
             end
         end else if(valid_in) begin 
             case(pool_mode) 
@@ -71,21 +71,18 @@ module pooling_unit_2d #(
                 // Mode 01: 2x2 Max Pooling
                 `POOL_MODE_MAX: begin 
                     for(i=0; i<(PF*PV);i=i+1) begin : POOL_MODE_MAX
-                        wire signed [DATA_WIDTH-1:0] in_val;
-                        assign in_val = features_in[(i+1)*DATA_WIDTH-1 : i*DATA_WIDTH];
-
                         if(pool_step == {POOL_CNT_WIDTH{1'b0}}) begin 
                             // Initialize with first pixel
-                            max_regs[i] <= in_val;
+                            max_regs[i] <= $signed(features_in[(i+1)*DATA_WIDTH-1 +: DATA_WIDTH]);
                         end else begin 
                             // Maximum is tracked
-                            if(in_val > max_regs[i]) begin 
-                                max_regs[i] <= in_val;
+                            if($signed(features_in[(i+1)*DATA_WIDTH-1 +: DATA_WIDTH]) > max_regs[i]) begin 
+                                max_regs[i] <=  $signed(features_in[(i+1)*DATA_WIDTH-1 +: DATA_WIDTH]);
                             end
                         end
 
                         if(pool_win_done) begin 
-                            pooled_features[(i+1)*DATA_WIDTH-1: I*DATA_WIDTH] <= (in_val > max_regs[i]) ? in_val : max_regs[i];
+                            pooled_features[(i+1)*DATA_WIDTH-1 +: DATA_WIDTH] <= ($signed(features_in[(i+1)*DATA_WIDTH-1 +: DATA_WIDTH]) > max_regs[i]) ? features_in[(i+1)*DATA_WIDTH-1 +: DATA_WIDTH] : max_regs[i];
                         end
                     end
                     valid_out <= pool_win_done;
@@ -94,18 +91,15 @@ module pooling_unit_2d #(
                 // Mode 10: 2x2 Average Pooling
                 `POOL_MODE_AVG: begin 
                     for (i = 0; i < (PF * PV); i = i + 1) begin : POOL_MODE_AVG
-                        wire signed [DATA_WIDTH-1:0] in_val;
-                        assign in_val = features_in[(i+1)*DATA_WIDTH-1 : i*DATA_WIDTH];
-                        wire signed [(DATA_WIDTH + POOL_CNT_WIDTH)-1:0] in_val_ext;
-                        assign in_val_ext = {{POOL_CNT_WIDTH{in_val[DATA_WIDTH-1]}}, in_val};
-                        wire signed [(DATA_WIDTH + POOL_CNT_WIDTH)-1:0] current_sum;
-                        assign current_sum = (pool_step == {POOL_CNT_WIDTH{1'b0}}) ? in_val_ext : (sum_regs[i] + in_val_ext);
-
-                        sum_regs[i] <= current_sum;
+                        if (pool_step == {POOL_CNT_WIDTH{1'b0}}) begin
+                            sum_regs[i] <= {{POOL_CNT_WIDTH{features_in[(i+1)*DATA_WIDTH-1]}}, features_in[(i+1)*DATA_WIDTH-1 +: DATA_WIDTH]};
+                        end else begin
+                            sum_regs[i] <= sum_regs[i] + {{POOL_CNT_WIDTH{features_in[(i+1)*DATA_WIDTH-1]}}, features_in[(i+1)*DATA_WIDTH-1 +: DATA_WIDTH]};
+                        end
 
                         if(pool_win_done) begin 
                             // Divide total sum by 2^POOL_CNT_WIDTH via arithmetic right shift
-                            pooled_features[(i+1)*DATA_WIDTH-1 : i*DATA_WIDTH] <= current_sum >>> POOL_CNT_WIDTH;
+                            pooled_features[(i+1)*DATA_WIDTH-1 +: DATA_WIDTH] <= (sum_regs[i] + {{POOL_CNT_WIDTH{features_in[(i+1)*DATA_WIDTH-1]}}, features_in[(i+1)*DATA_WIDTH-1 +: DATA_WIDTH]}) >>> POOL_CNT_WIDTH;
                         end
                     end
                     valid_out <= pool_win_done;

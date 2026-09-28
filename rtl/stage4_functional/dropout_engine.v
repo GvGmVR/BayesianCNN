@@ -65,10 +65,10 @@ module dropout_engine #(
                 // Channel-wise Bernoulli Masking: O[f] = Y[f] * M[f]
                 for (f=0;f<(PF*PV);f=f+1) begin 
                     if(mask_in[f % PF] == 1'b1) begin 
-                        masked_features[(f+1)*DATA_WIDTH-1 : f*DATA_WIDTH] <= features_in[(f+1)*DATA_WIDTH-1 : f*DATA_WIDTH];
+                        masked_features[(f+1)*DATA_WIDTH-1 +: DATA_WIDTH] <= features_in[(f+1)*DATA_WIDTH-1 +: DATA_WIDTH];
                     end else begin
                         // Drop feature channel
-                        masked_features[(f+1)*DATA_WIDTH-1 : f*DATA_WIDTH] <= {DATA_WIDTH{1'b0}};
+                        masked_features[(f+1)*DATA_WIDTH-1 +: DATA_WIDTH] <= {DATA_WIDTH{1'b0}};
                     end
                 end
             end else begin 
@@ -78,7 +78,7 @@ module dropout_engine #(
             end
         end else begin 
             valid_out <= 1'b0;
-            mask_pop <= 1'b0
+            mask_pop <= 1'b0;
         end
     end
 
