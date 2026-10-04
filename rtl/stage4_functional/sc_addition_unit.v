@@ -23,7 +23,7 @@
 //   clamping to [INT_MIN, INT_MAX] to prevent 8-bit signed overflow.
 //==============================================================================
 
-`include "../bcnn_pkg.vh"
+`include "bcnn_pkg.vh"
 
 module sc_addition_unit #(
     parameter DATA_WIDTH = `DATA_WIDTH,
@@ -40,8 +40,8 @@ module sc_addition_unit #(
     input  wire [(PF * PV * DATA_WIDTH)-1:0] sc_features_in,
 
     //Shortcut addition output features
-    output reg [(PF * PV * DATA_WIDTH)-1:0] sc_features_out,
-    output reg valid_out
+    output wire [(PF * PV * DATA_WIDTH)-1:0] sc_features_out,
+    output wire valid_out
 );
 
     localparam signed [DATA_WIDTH-1:0] INT_MAX = {1'b0,{(DATA_WIDTH-1){1'b1}}}; // +127
@@ -64,19 +64,10 @@ module sc_addition_unit #(
             wire signed [DATA_WIDTH-1:0] clamped_sum;
             assign clamped_sum = (raw_sum > $signed({{1'b0},INT_MAX})) ? INT_MAX: (raw_sum < $signed({{1'b1},INT_MIN})) ? INT_MIN : raw_sum[DATA_WIDTH-1:0];
         
-            //If sc_en=1 apply sum, else pass conv_val unaltered
-            assign added_bus[(f+1)*DATA_WIDTH-1: f*DATA_WIDTH] = sc_en ? clamped_sum : conv_val;
+            assign sc_features_out[(f+1)*DATA_WIDTH-1 : f*DATA_WIDTH] = sc_en ? clamped_sum : conv_val;
         end
     endgenerate
 
-    always @(posedge clk or negedge rst_n) begin
-        if(!rst_n) begin 
-            sc_features_out <= {(PF*PV*DATA_WIDTH){1'b0}};
-            valid_out <= 1'b0;
-        end else begin 
-            sc_features_out <= added_bus;
-            valid_out <= valid_in;
-        end
-    end
-    
+    assign valid_out = valid_in;
+
 endmodule

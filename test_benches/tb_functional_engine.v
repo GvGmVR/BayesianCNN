@@ -1,5 +1,5 @@
 `timescale 1ns / 1ps
-`include "../bcnn_pkg.vh"
+`include "bcnn_pkg.vh"
 
 module tb_functional_engine;
 
@@ -27,6 +27,7 @@ module tb_functional_engine;
     wire sampler_mask_full;
     wire [`MASK_FIFO_ADDR:0] sampler_mask_count;
     wire stage4_mask_pop;
+    reg  mask_load;
 
     // Stage 4 Outputs
     wire [(`PF * `PV * `DATA_WIDTH)-1:0] stage4_features_out;
@@ -75,6 +76,7 @@ module tb_functional_engine;
         .sc_features_in(sc_features_in),
         .mask_in(sampler_mask_out),
         .mask_valid(sampler_mask_valid),
+        .mask_load(mask_load),
         .mask_pop(stage4_mask_pop),
         .stage4_features_out(stage4_features_out),
         .stage4_valid_out(stage4_valid_out)
@@ -85,6 +87,13 @@ module tb_functional_engine;
     integer f,error_count;
 
     reg signed [7:0] ch0_out, ch1_out;
+
+    // Test 5 bookkeeping
+    reg [`PF-1:0] applied_mask;
+    reg signed [7:0] pix_val;
+    integer p, t5_errors, pop_count;
+
+    always @(posedge clk) if (stage4_mask_pop) pop_count = pop_count + 1;
 
     // Watchdog Timeout
     initial begin
@@ -109,6 +118,9 @@ module tb_functional_engine;
         sc_features_in = 0;
         sampler_en = 0;
         load_seed = 0;
+        mask_load = 0;
+        pop_count = 0;
+        t5_errors = 0;
         seed_in = { {(`LFSR_WIDTH-16){1'b0}}, 16'hACE1 };
         error_count = 0;
 
@@ -149,9 +161,9 @@ module tb_functional_engine;
             end
         end
 
-        @(posedge clk);
+        @(negedge clk);
         valid_in = 1'b1;
-        @(posedge clk)
+        @(negedge clk);
         valid_in = 1'b0;
 
         while (!stage4_valid_out) @(posedge clk);
@@ -179,28 +191,28 @@ module tb_functional_engine;
 
         // Step 0: Pixel = 10
         for (f = 0; f < `PF; f = f + 1) conv_features_in[f*8 +: 8] = 8'sd10;
-        @(posedge clk);
+        @(negedge clk);
         valid_in = 1'b1;
         pool_step = 2'd0;
         pool_win_done = 1'b0;
 
         // Step 1: Pixel = 45
-        @(posedge clk);
+        @(negedge clk);
         for (f = 0; f < `PF; f = f + 1) conv_features_in[f*8 +: 8] = 8'sd45;
         pool_step = 2'd1;
 
         // Step 2: Pixel = 30
-        @(posedge clk);
+        @(negedge clk);
         for (f = 0; f < `PF; f = f + 1) conv_features_in[f*8 +: 8] = 8'sd30;
         pool_step = 2'd2;
 
         // Step 3: Pixel = 22
-        @(posedge clk);
+        @(negedge clk);
         for (f = 0; f < `PF; f = f + 1) conv_features_in[f*8 +: 8] = 8'sd22;
         pool_step = 2'd3;
         pool_win_done = 1'b1;
 
-        @(posedge clk);
+        @(negedge clk);
         valid_in = 1'b0;
         pool_win_done = 1'b0;
 
@@ -227,28 +239,28 @@ module tb_functional_engine;
 
         // Step 0: 12
         for (f = 0; f < `PF; f = f + 1) conv_features_in[f*8 +: 8] = 8'sd12;
-        @(posedge clk);
+        @(negedge clk);
         valid_in = 1'b1;
         pool_step = 2'd0;
         pool_win_done = 1'b0;
 
         // Step 1: 24
-        @(posedge clk);
+        @(negedge clk);
         for (f = 0; f < `PF; f = f + 1) conv_features_in[f*8 +: 8] = 8'sd24;
         pool_step = 2'd1;
 
         // Step 2: 36
-        @(posedge clk);
+        @(negedge clk);
         for (f = 0; f < `PF; f = f + 1) conv_features_in[f*8 +: 8] = 8'sd36;
         pool_step = 2'd2;
 
         // Step 3: 48 (Window Complete: Sum=120, Avg=30)
-        @(posedge clk);
+        @(negedge clk);
         for (f = 0; f < `PF; f = f + 1) conv_features_in[f*8 +: 8] = 8'sd48;
         pool_step = 2'd3;
         pool_win_done = 1'b1;
 
-        @(posedge clk);
+        @(negedge clk);
         valid_in = 1'b0;
         pool_win_done = 1'b0;
 
@@ -269,7 +281,7 @@ module tb_functional_engine;
         $display("\n[TEST 5] Testing Integrated Bayesian Dropout Masking with Stage 2...");
         #20;
         // Start Stage 2 PRNG Sampler to fill FIFO with random masks
-        @(posedge clk);
+        @(negedge clk);
         sampler_en = 1'b1;
         while(sampler_mask_count < 5) @(posedge clk); //Wait for masks
 
@@ -277,33 +289,52 @@ module tb_functional_engine;
         pool_mode = `POOL_MODE_BYPASS;
         mcd_en = 1'b1;
 
-        // Send feature value = 50 across all 64 channels
-        for (f = 0; f < `PF; f = f + 1) conv_features_in[f*8 +: 8] = 8'sd50;
+        // Controller requests a new filter-wise mask for this PF-filter tile.
+        // FIFO is FWFT: the head word is applied, then popped on this edge.
+        @(negedge clk);
+        mask_load = 1'b1;
+        applied_mask = sampler_mask_out;
+        pop_count = 0;
+        @(negedge clk);
+        mask_load = 1'b0;
 
-        @(posedge clk);
-        valid_in = 1'b1;
-        @(posedge clk);
-        valid_in = 1'b0;
+        $display("  -> Applied Mask: 0x%016X", applied_mask[63:0]);
 
-        while (!stage4_valid_out) @(posedge clk);
-        #1;
+        // Two spatial pixels of the same tile must share the same mask (Eq. 2: O = Y * M)
+        for (p = 0; p < 2; p = p + 1) begin
+            pix_val = (p == 0) ? 8'sd50 : -8'sd30;
+            for (f = 0; f < `PF; f = f + 1) conv_features_in[f*8 +: 8] = pix_val;
 
-        $display("  -> Applied Mask: 0x%016X", sampler_mask_out[63:0]);
-        $display("  -> Output Ch 0: %d | Output Ch 1: %d", stage4_features_out[7:0], stage4_features_out[15:8]);
+            @(negedge clk);
+            valid_in = 1'b1;
+            @(negedge clk);
+            valid_in = 1'b0;
 
-        // Verify that dropped channels (mask bit == 0) are 0, and kept channels (mask bit == 1) are 50
-        for (f = 0; f < `PF; f = f + 1) begin
-            if (sampler_mask_out[f] == 1'b1 && stage4_features_out[f*8 +: 8] !== 8'sd50) begin
-                $display("[ERROR] Kept channel %d corrupted! Got: %d", f, stage4_features_out[f*8 +: 8]);
-                error_count = error_count + 1;
-            end else if (sampler_mask_out[f] == 1'b0 && stage4_features_out[f*8 +: 8] !== 8'sd0) begin
-                $display("[ERROR] Dropped channel %d not zeroed! Got: %d", f, stage4_features_out[f*8 +: 8]);
-                error_count = error_count + 1;
+            while (!stage4_valid_out) @(posedge clk);
+            #1;
+
+            $display("  -> Pixel %0d (in=%0d): Output Ch 0: %0d | Output Ch 2: %0d", p, pix_val,
+                     $signed(stage4_features_out[7:0]), $signed(stage4_features_out[23:16]));
+
+            for (f = 0; f < `PF; f = f + 1) begin
+                if (applied_mask[f] == 1'b1 && stage4_features_out[f*8 +: 8] !== pix_val) begin
+                    $display("[ERROR] Pixel %0d: Kept channel %0d corrupted! Got: %0d", p, f, $signed(stage4_features_out[f*8 +: 8]));
+                    t5_errors = t5_errors + 1;
+                end else if (applied_mask[f] == 1'b0 && stage4_features_out[f*8 +: 8] !== 8'sd0) begin
+                    $display("[ERROR] Pixel %0d: Dropped channel %0d not zeroed! Got: %0d", p, f, $signed(stage4_features_out[f*8 +: 8]));
+                    t5_errors = t5_errors + 1;
+                end
             end
         end
 
-        if (error_count == 0) begin
-            $display("[TEST 5 PASSED] Integrated Stage 2 & Stage 4 Dropout Masking verified.");
+        if (pop_count !== 1) begin
+            $display("[ERROR] Expected exactly 1 mask pop for the tile, got %0d", pop_count);
+            t5_errors = t5_errors + 1;
+        end
+
+        error_count = error_count + t5_errors;
+        if (t5_errors == 0) begin
+            $display("[TEST 5 PASSED] Integrated Stage 2 & Stage 4 filter-wise Dropout Masking verified.");
         end
 
         // Final Summary

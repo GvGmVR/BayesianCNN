@@ -23,7 +23,7 @@
 //   accumulates 4 pixels and divides by 4 (arithmetic shift right by 2).
 //==============================================================================
 
-`include "../bcnn_pkg.vh"
+`include "bcnn_pkg.vh"
 
 module pooling_unit_2d #(
     parameter DATA_WIDTH = `DATA_WIDTH,
@@ -73,16 +73,16 @@ module pooling_unit_2d #(
                     for(i=0; i<(PF*PV);i=i+1) begin : POOL_MODE_MAX
                         if(pool_step == {POOL_CNT_WIDTH{1'b0}}) begin 
                             // Initialize with first pixel
-                            max_regs[i] <= $signed(features_in[(i+1)*DATA_WIDTH-1 +: DATA_WIDTH]);
+                            max_regs[i] <= $signed(features_in[i*DATA_WIDTH +: DATA_WIDTH]);
                         end else begin 
                             // Maximum is tracked
-                            if($signed(features_in[(i+1)*DATA_WIDTH-1 +: DATA_WIDTH]) > max_regs[i]) begin 
-                                max_regs[i] <=  $signed(features_in[(i+1)*DATA_WIDTH-1 +: DATA_WIDTH]);
+                            if($signed(features_in[i*DATA_WIDTH +: DATA_WIDTH]) > max_regs[i]) begin 
+                                max_regs[i] <=  $signed(features_in[i*DATA_WIDTH +: DATA_WIDTH]);
                             end
                         end
 
                         if(pool_win_done) begin 
-                            pooled_features[(i+1)*DATA_WIDTH-1 +: DATA_WIDTH] <= ($signed(features_in[(i+1)*DATA_WIDTH-1 +: DATA_WIDTH]) > max_regs[i]) ? features_in[(i+1)*DATA_WIDTH-1 +: DATA_WIDTH] : max_regs[i];
+                            pooled_features[i*DATA_WIDTH +: DATA_WIDTH] <= ($signed(features_in[i*DATA_WIDTH +: DATA_WIDTH]) > max_regs[i]) ? features_in[i*DATA_WIDTH +: DATA_WIDTH] : max_regs[i];
                         end
                     end
                     valid_out <= pool_win_done;
@@ -92,14 +92,14 @@ module pooling_unit_2d #(
                 `POOL_MODE_AVG: begin 
                     for (i = 0; i < (PF * PV); i = i + 1) begin : POOL_MODE_AVG
                         if (pool_step == {POOL_CNT_WIDTH{1'b0}}) begin
-                            sum_regs[i] <= {{POOL_CNT_WIDTH{features_in[(i+1)*DATA_WIDTH-1]}}, features_in[(i+1)*DATA_WIDTH-1 +: DATA_WIDTH]};
+                            sum_regs[i] <= {{POOL_CNT_WIDTH{features_in[i*DATA_WIDTH + DATA_WIDTH-1]}}, features_in[i*DATA_WIDTH +: DATA_WIDTH]};
                         end else begin
-                            sum_regs[i] <= sum_regs[i] + {{POOL_CNT_WIDTH{features_in[(i+1)*DATA_WIDTH-1]}}, features_in[(i+1)*DATA_WIDTH-1 +: DATA_WIDTH]};
+                            sum_regs[i] <= sum_regs[i] + $signed({{POOL_CNT_WIDTH{features_in[i*DATA_WIDTH + DATA_WIDTH-1]}}, features_in[i*DATA_WIDTH +: DATA_WIDTH]});
                         end
 
                         if(pool_win_done) begin 
                             // Divide total sum by 2^POOL_CNT_WIDTH via arithmetic right shift
-                            pooled_features[(i+1)*DATA_WIDTH-1 +: DATA_WIDTH] <= (sum_regs[i] + {{POOL_CNT_WIDTH{features_in[(i+1)*DATA_WIDTH-1]}}, features_in[(i+1)*DATA_WIDTH-1 +: DATA_WIDTH]}) >>> POOL_CNT_WIDTH;
+                            pooled_features[i*DATA_WIDTH +: DATA_WIDTH] <= (sum_regs[i] + $signed({{POOL_CNT_WIDTH{features_in[i*DATA_WIDTH + DATA_WIDTH-1]}}, features_in[i*DATA_WIDTH +: DATA_WIDTH]})) >>> POOL_CNT_WIDTH;
                         end
                     end
                     valid_out <= pool_win_done;

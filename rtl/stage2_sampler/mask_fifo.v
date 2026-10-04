@@ -20,7 +20,7 @@
 //   allowing masks to be pre-generated with zero compute stall cycles.
 //==============================================================================
 
-`include "../bcnn_pkg.vh"
+`include "bcnn_pkg.vh"
 
 module mask_fifo #(
     parameter DATA_WIDTH = `PF,
@@ -33,7 +33,7 @@ module mask_fifo #(
     output wire full,
 
     input wire pop,
-    output reg [DATA_WIDTH-1:0] dout,
+    output wire [DATA_WIDTH-1:0] dout,
     output wire empty,
     output wire [ADDR_WIDTH:0] occupancy 
 );
@@ -47,12 +47,13 @@ module mask_fifo #(
     assign empty = (count == {(ADDR_WIDTH+1){1'b0}});
     assign occupancy = count;
 
+    assign dout = empty ? {DATA_WIDTH{1'b0}} : mem[rd_ptr];
+
     always@(posedge clk or negedge rst_n)begin
         if(!rst_n)begin 
             wr_ptr <= {ADDR_WIDTH{1'b0}};
             rd_ptr <= {ADDR_WIDTH{1'b0}};
             count <= {(ADDR_WIDTH+1){1'b0}};
-            dout <= {DATA_WIDTH{1'b0}};
         end else begin 
             //push
             if(push && !full)begin 
@@ -61,7 +62,6 @@ module mask_fifo #(
             end
             // pop 
             if (pop && !empty)begin 
-                dout <= mem[rd_ptr];
                 rd_ptr <= rd_ptr + 1'b1;
             end
 

@@ -19,6 +19,7 @@
 //   - sc_features_in      : PF x PV parallel INT8 cached channels from SC Buffer.
 //   - mask_in             : PF-bit (64-bit) Bernoulli mask from Stage 2 Sampler.
 //   - mask_valid          : Valid handshake from Stage 2 Sampler FIFO.
+//   - mask_load           : 1-cycle strobe to latch a new filter-wise mask (new PF-filter tile / MC sample).
 //
 // Architectural Outputs:
 //   - mask_pop            : 1-cycle pop strobe sent to Stage 2 Sampler FIFO.
@@ -30,7 +31,7 @@
 //   fully pipelined post-processing datapath with zero intra-stage bubbles.
 //==============================================================================
 
-`include "../bcnn_pkg.vh"
+`include "bcnn_pkg.vh"
 
 module functional_engine #(
     parameter DATA_WIDTH = `DATA_WIDTH,
@@ -52,6 +53,7 @@ module functional_engine #(
 
     input  wire [PF-1:0] mask_in,
     input  wire mask_valid,
+    input  wire mask_load,
     output wire mask_pop,
 
     output wire [(PF * PV * DATA_WIDTH)-1:0] stage4_features_out,
@@ -113,6 +115,7 @@ module functional_engine #(
         .features_in(pool_out_bus),
         .mask_in(mask_in),
         .mask_valid(mask_valid),
+        .mask_load(mask_load),
         .mask_pop(mask_pop),
         .masked_features(stage4_features_out),
         .valid_out(stage4_valid_out)
