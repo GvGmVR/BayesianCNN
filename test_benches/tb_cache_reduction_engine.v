@@ -32,6 +32,10 @@ module tb_cache_reduction_engine;
     localparam BUS_W = `PF * `PV * `DATA_WIDTH;
     localparam VW = 2 * `DATA_WIDTH;
 
+    // UAMH configuration sized to the DUT ports
+    localparam [`SAMPLE_CNT_WIDTH-1:0] EE_MIN_SAMPLES = `MIN_SAMPLES_EXIT;
+    localparam [$clog2(`PF*`PV+1)-1:0] UTAG_HIGH_COUNT = `UTAG_HIGH_COUNT_TH;
+
     reg clk, rst_n;
     reg start_inference, layer_done;
     reg [`LAYER_CNT_WIDTH-1:0] total_layers_N, bayesian_layers_B;
@@ -44,7 +48,7 @@ module tb_cache_reduction_engine;
     wire replay_mask_pop;
     wire [BUS_W-1:0] replay_features;
     wire replay_valid;
-    wire [`IC_ADDR_WIDTH:0] ic_word_count;
+    wire [`IC_ADDR_WIDTH+1:0] ic_word_count;
     wire ic_full;
     wire [`SAMPLE_CNT_WIDTH-1:0] sample_idx;
     wire [`LAYER_CNT_WIDTH-1:0] layer_idx;
@@ -73,7 +77,27 @@ module tb_cache_reduction_engine;
         .replay_features(replay_features),
         .replay_valid(replay_valid),
         .ic_word_count(ic_word_count),
+        .ic_byte_count(),
         .ic_full(ic_full),
+        .umps_en(1'b0),
+        .umps_thresh(`UMPS_DEFAULT_THRESH),
+        .utag_en(1'b0),
+        .utag_zero_thresh(`UTAG_ZERO_THRESH),
+        .utag_high_count_th(UTAG_HIGH_COUNT),
+        .spill_features(),
+        .spill_valid(),
+        .spill_req(),
+        .spill_ret_features({(NCH*DW){1'b0}}),
+        .spill_ret_valid(1'b0),
+        .high_u_cached_count(),
+        .low_u_bypassed_count(),
+        .current_line_u_tag(),
+        .early_exit_en(1'b0),
+        .early_exit_thresh(`DEFAULT_EXIT_THRESH),
+        .early_exit_min_samples(EE_MIN_SAMPLES),
+        .eval_pending(),
+        .early_exit_triggered(),
+        .samples_executed(),
         .sample_idx(sample_idx),
         .layer_idx(layer_idx),
         .busy(busy),

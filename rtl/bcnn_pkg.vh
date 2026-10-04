@@ -69,4 +69,33 @@
 `define REDUCER_ACCUM_WIDTH 24          // Accumulator width for S samples: DATA_WIDTH + SAMPLE_CNT_WIDTH + margin
 `define VAR_ACCUM_WIDTH 32          // Variance sum-of-squares accumulator width
 
+// -------------------------------------------------------------
+// UAMH Innovation 1: UMPS Parameters
+// -------------------------------------------------------------
+`define INT4_WIDTH 4 // Truncated precision width
+`define UMPS_THRESH_WIDTH 8 // Threshold bit-width
+`define UMPS_DEFAULT_THRESH 8'sd16 // Default variance/activity threshold (INT8)
+`define PRECISION_MODE_INT8 1'b0 // Full precision mode
+`define PRECISION_MODE_INT4 1'b1 // Packed 4-bit precision mode
+
+// -------------------------------------------------------------
+// UAMH Innovation 3: U-Tagging Parameters
+// -------------------------------------------------------------
+`define UTAG_WIDTH 2 // 2-bit Uncertainty Tag
+`define UTAG_ZERO 2'b00 // Inactive / Zero-activity line
+`define UTAG_LOW 2'b01 // Confident / Low-uncertainty line
+`define UTAG_HIGH 2'b10 // Ambiguous / High-uncertainty line
+`define UTAG_PINNED 2'b11 // Safety-critical / Pinned line
+`define UTAG_ZERO_THRESH 8'sd4 // Absolute magnitude below which a channel is considered zero
+`define UTAG_HIGH_COUNT_TH 6'd8 // Number of active/high channels required to classify line as UTAG_HIGH
+`define UTAG_CAP_THRESH_PCT 80 // Percentage of IC buffer occupancy to trigger admission filtering (80%)
+
+// -------------------------------------------------------------
+// UAMH Innovation 2: Early-Exit Convergence Parameters
+// -------------------------------------------------------------
+`define EARLY_EXIT_THRESH_WIDTH 16 // Variance delta threshold bit-width
+`define DEFAULT_EXIT_THRESH 16'd4 // Default convergence variance tolerance epsilon
+`define MIN_SAMPLES_EXIT 4 // Minimum mandatory samples before early exit (S_min >= 2 for variance)
+`define CONV_STABILITY_COUNT 2 // Number of consecutive stable passes required to exit (K)
+
 `endif

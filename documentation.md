@@ -15,9 +15,13 @@ Reference paper: H. Fan, M. Ferianc, Z. Que, S. Liu, X. Niu, M. Rodrigues, W. Lu
    - [Stage 4 — Functional & Dropout Engine](#stage-4--functional--dropout-engine-rtlstage4_functional)
    - [Stage 5 — Cache & Reduction Engine](#stage-5--cache--reduction-engine-rtlstage5_cache_reduction)
    - [Master Top-Level](#master-top-level-rtlbcnn_topv)
-4. [Verification Suite & Results](#4-verification-suite--results)
-5. [Build, Simulation & Toolchain Guide](#5-build-simulation--toolchain-guide)
-6. [Known Limitations & Deviations from the Paper](#6-known-limitations--deviations-from-the-paper)
+4. [UAMH Innovations (`rtl/UAMH/`)](#4-uamh-innovations-rtluamh)
+   - [Innovation 1 — Uncertainty-Modulated Precision Storage (UMPS)](#41-innovation-1--uncertainty-modulated-precision-storage-umps)
+   - [Innovation 2 — Closed-Loop Early-Exit Sample Throttling](#42-innovation-2--closed-loop-early-exit-sample-throttling)
+   - [Innovation 3 — Uncertainty-Tagged Cache Lines (U-Tagging)](#43-innovation-3--uncertainty-tagged-cache-lines-u-tagging)
+5. [Verification Suite & Results](#5-verification-suite--results)
+6. [Build, Simulation & Toolchain Guide](#6-build-simulation--toolchain-guide)
+7. [Known Limitations & Deviations from the Paper](#7-known-limitations--deviations-from-the-paper)
 
 ---
 
@@ -30,6 +34,14 @@ This repository implements, in synthesizable Verilog, the Monte Carlo Dropout (M
 The default configuration matches the paper's implemented design point (Section VI-A): $P_V = 1$, $P_C = 64$, $P_F = 64$, INT8 linear quantization. The paper's board design ran at 225 MHz on an Intel Arria 10 SX660; the RTL headers and testbenches here use a 220 MHz clock (4.54 ns period).
 
 The network is executed layer by layer on a single NNE (Section III-A2). For a network with N layers of which the last B are Bayesian, the first sample runs all N layers; every subsequent sample skips layers 1..N−B and replays the cached output of layer N−B from on-chip memory with a fresh dropout mask.
+
+Beyond the paper, `rtl/UAMH/` adds three optional innovations around the IC buffer and the Monte Carlo loop ([Section 4](#4-uamh-innovations-rtluamh)):
+
+- **UMPS** stores low-activity channel pairs of the cached layer as two INT4 nibbles in one byte, so the same IC memory holds up to 2× more pixels, losslessly.
+- **Early exit** stops the Monte Carlo loop as soon as the running per-channel variance has stopped changing, and finalizes the mean and variance over the samples actually run.
+- **U-Tagging** tags every cached line by information content. Under memory pressure, flat lines are spilled to DRAM rather than filling on-chip memory, and spilled lines are brought back in order during replay.
+
+All three are disabled by default (`umps_en = utag_en = early_exit_en = 0`). With them disabled, the accelerator behaves exactly as the paper baseline, cycle for cycle.
 
 ### 1.2 Block diagram
 
@@ -162,13 +174,32 @@ Every RTL file includes `bcnn_pkg.vh` (compiled with `-I rtl`) and exposes each 
 | `REDUCER_ACCUM_WIDTH` | 24 | Signed running sum of S INT8 samples |
 | `VAR_ACCUM_WIDTH` | 32 | Running sum of squares; also the divider iteration count |
 
-### 2.6 Parameterization rules and reconfiguration
+### 2.6 UAMH innovations
+
+| Macro | Value | Meaning |
+|---|---|---|
+| `INT4_WIDTH` | 4 | Packed precision (UMPS); requires `DATA_WIDTH = 2 × INT4_WIDTH` |
+| `UMPS_THRESH_WIDTH` | 8 | Width of the UMPS activity threshold τ |
+| `UMPS_DEFAULT_THRESH` | `8'sd16` | Default τ (with τ ≥ 7 only the INT4 range test matters) |
+| `PRECISION_MODE_INT8` / `INT4` | `1'b0` / `1'b1` | Per-channel precision metadata values |
+| `EARLY_EXIT_THRESH_WIDTH` | 16 | Width of the convergence tolerance ε |
+| `DEFAULT_EXIT_THRESH` | `16'd4` | Default ε |
+| `MIN_SAMPLES_EXIT` | 4 | Warm-up $S_{min}$ before an early exit is allowed |
+| `CONV_STABILITY_COUNT` | 2 | Consecutive stable passes K required to exit |
+| `UTAG_WIDTH` | 2 | Uncertainty tag width |
+| `UTAG_ZERO` / `LOW` / `HIGH` / `PINNED` | `2'b00` / `01` / `10` / `11` | Tag values |
+| `UTAG_ZERO_THRESH` | `8'sd4` | Channels with \|value\| ≤ this count as inactive |
+| `UTAG_HIGH_COUNT_TH` | `6'd8` | INT8-precision channels needed for `UTAG_HIGH` (the port is 7 bits wide, since counting 64 channels needs 7) |
+| `UTAG_CAP_THRESH_PCT` | 80 | IC occupancy (%) at which admission filtering starts |
+
+### 2.7 Parameterization rules and reconfiguration
 
 - **No hard-coded widths.** Ports, buses and constants are written in terms of these macros or module parameters, e.g. `[(PF*PV*DATA_WIDTH)-1:0]`, `{DATA_WIDTH{1'b0}}`. A channel is always sliced as `bus[f*DATA_WIDTH +: DATA_WIDTH]`; its sign bit is `bus[(f+1)*DATA_WIDTH-1]`. An earlier bug used `bus[f*DATA_WIDTH-1 +: DATA_WIDTH]`, which reads bit −1 (X) for channel 0 and misaligns every other channel. That form is banned.
 - **Two levels of reconfiguration**, as in the paper (Section V-A):
   - *Hardware parameters* (synthesis time): `PC`, `PF`, `PV`, `N_LFSR`, memory depths. The paper explores $P_C, P_F \in \{8,16,32,64,128\}$ and $P_V \in \{1,4,8,16\}$.
   - *Run-time configuration* (per layer, from the host): `H`, `W`, `C_tiles`, `W_tiles`, `L_frames`, `KH`, `KW`, `KL`, `stride`, `mode_3d`, `relu_en`, `sc_en`, `pool_mode` and the quantization triplet. Per network: `total_layers_N`, `bayesian_layers_B`, `total_samples_S`.
-- **Topologies.** LeNet-5, VGG-11, ResNet-18/34 and 3D CNNs are expressed as sequences of convolution layers with optional ReLU, pooling, shortcut addition and MCD. They differ only in the run-time configuration above and in the number of layers N, as long as each layer fits the current RTL limits in [Section 6](#6-known-limitations--deviations-from-the-paper). In particular the address generator has no filter-tile loop, padding or strided output sizing yet, and pooling assumes consecutive pixels. The verified system configuration is a 3-layer 1×1-convolution network.
+  - *UAMH configuration* (per inference, latched at `start_inference`): `umps_en`, `umps_thresh`, `utag_en`, `utag_zero_thresh`, `utag_high_count_th`, `early_exit_en`, `early_exit_thresh`, `early_exit_min_samples`.
+- **Topologies.** LeNet-5, VGG-11, ResNet-18/34 and 3D CNNs are expressed as sequences of convolution layers with optional ReLU, pooling, shortcut addition and MCD. They differ only in the run-time configuration above and in the number of layers N, as long as each layer fits the current RTL limits in [Section 7](#7-known-limitations--deviations-from-the-paper). In particular the address generator has no filter-tile loop, padding or strided output sizing yet, and pooling assumes consecutive pixels. The verified system configuration is a 3-layer 1×1-convolution network.
 
 ---
 
@@ -459,68 +490,95 @@ Pipeline latencies quoted below are in clock cycles. "Issue" means the cycle in 
 #### 3.5.1 `ic_buffer.v`
 
 - **Path:** `rtl/stage5_cache_reduction/ic_buffer.v`
-- **Purpose:** On-chip simple dual-port BRAM holding the **unmasked** output of layer N−B, captured during sample 1.
+- **Purpose:** On-chip cache holding the **unmasked** output of layer N−B, captured during sample 1. Lines can have variable length, so that UMPS-compressed pixels really do take less memory.
 - **Paper reference:** Section IV-B, Fig. 11(c) (intermediate results cached directly in on-chip memory, unlike the off-chip caching of earlier work).
-- **Interface:** Port A (`wr_en`, `wr_addr`, `wr_data`); Port B (`rd_en`, `rd_addr`, `rd_data`, `rd_valid`).
+- **Interface:**
+  - Control: `clear` (inference start) and `rd_rewind` (layer boundary).
+  - Write side: `wr_en`, `wr_data`, `wr_len` (bytes), `wr_mask` (UMPS precision metadata), `wr_u_tag`.
+  - Read side: `rd_en`, `rd_data`, `rd_mask`, `rd_u_tag`, `rd_valid`.
+  - Occupancy: `line_count`, `byte_count`, `full`.
 - **Datapath:**
-  - `mem[IC_RAM_DEPTH]` holds `PF×PV×DATA_WIDTH`-bit words; one word is one output pixel.
-  - The read is registered, so `rd_data` is valid one cycle after `rd_en`, with `rd_valid` as its strobe.
-  - The array has no reset, so it maps onto block RAM.
+  - **Storage:** `PF×PV` byte-wide RAM lanes (`GEN_LANE[k].bank`) of `IC_RAM_DEPTH` rows, addressed as one byte stream. Byte address A lives in lane A mod (PF×PV), row A / (PF×PV).
+  - **Back-to-back lines:** lines are appended at a byte write pointer, so a line can span two rows. Every lane still sees one row per cycle, so each lane maps onto its own block RAM. A rotator moves line byte j to lane (start + j) mod PF×PV on write, and back on read.
+  - **Per-line side arrays**, sized 2 × `IC_RAM_DEPTH` (the most half-size lines that fit):
+    - the length, read asynchronously because it is needed to find the next line's start address;
+    - one precision bit per channel pair, read synchronously with the data;
+    - the 2-bit U-tag, read synchronously with the data.
+  - **Order:** lines are read back in the order they were written. The read is registered, so data appears 1 cycle after `rd_en`.
+  - **Full:** `full` asserts when another full-length line would not fit, or when the line arrays are full.
+- **Baseline equivalence:** with full-length (64-byte) lines, every line starts on a row boundary and the buffer behaves exactly like the original one-pixel-per-row cache.
+- **Simulation view:** a simulation-only array `mem[row]` (excluded under `` `ifdef SYNTHESIS ``) mirrors the lanes row by row, so testbenches can inspect the cache contents.
 
 #### 3.5.2 `mc_sample_controller.v`
 
 - **Path:** `rtl/stage5_cache_reduction/mc_sample_controller.v`
-- **Purpose:** Tracks the current layer $l \in [1,N]$ and sample $s \in [1,S]$, and derives the routing flags.
+- **Purpose:** Tracks the current layer $l \in [1,N]$ and sample $s \in [1,S]$, and derives the routing flags. It also implements the early-exit hold-and-decide step (Innovation 2).
 - **Paper reference:** Section II-B2 (partial Bayesian: the last B layers are Bayesian, the first N−B are a feature extractor); Section IV-B, Fig. 11; Section IV-A, Fig. 10 (layer-by-layer, sample-by-sample execution).
 - **Interface:**
   - Inputs: `start_inference`, `layer_done`, and the configuration `total_layers_N`, `bayesian_layers_B`, `total_samples_S`.
+  - Early-exit inputs: `early_exit_en`, `eval_done`, `early_exit_trigger`.
   - Progress outputs: `sample_idx`, `layer_idx`, `num_samples`, `busy`, `run_start`.
   - Routing outputs: `ic_write_en`, `ic_read_en`, `bypass_feature_extractor`, `mcd_en`, `is_final_layer`, `inference_done`.
+  - Early-exit outputs: `early_exit_active`, `eval_pending`, `samples_executed`, `early_exit_triggered`.
 - **Datapath:**
-  - **Start:** on `run_start` (`start_inference && !busy && N≠0`) it latches N and B (B clamped to N), and S. S becomes 1 if S = 0 or B = 0, since a non-Bayesian network gives identical passes.
+  - **Start:** on `run_start` (`start_inference && !busy && N≠0`) it latches N and B (B clamped to N), and S. S becomes 1 if S = 0 or B = 0, since a non-Bayesian network gives identical passes. It also latches `early_exit_en`.
   - **Layer advance:** on each `layer_done`, if the current layer is not N it increments the layer.
-  - **Sample advance:** otherwise, if this was not the last sample, it increments the sample and **jumps to layer N−B+1**.
+  - **Sample advance:** otherwise, if this was not the last sample, it increments the sample and **jumps to layer N−B+1**. With early exit active, it first raises `eval_pending` and holds the current sample until `eval_done`. It then either finishes early (`early_exit_trigger`) or advances.
   - **Finish:** otherwise it goes idle and pulses `inference_done`.
+  - `samples_executed` is updated each time layer N completes, so it ends as $s_{actual}$.
   - Flag equations (`det = N−B`):
     - `ic_write_en = busy && layer == det && sample == 1`
     - `bypass_feature_extractor = busy && sample > 1 && det ≠ 0`
     - `ic_read_en = bypass_feature_extractor && layer == det + 1`
     - `mcd_en = busy && B ≠ 0 && det ≤ layer < N`, i.e. MCD on the outputs of layers N−B..N−1, which are the inputs of the B Bayesian layers
     - `is_final_layer = busy && layer == N`
-  - **Savings:** total layer executions are $N + (S-1)\cdot B = (N-B) + B\cdot S$ instead of $N \cdot S$.
+  - **Savings:** total layer executions are $N + (S-1)\cdot B = (N-B) + B\cdot S$ instead of $N \cdot S$. With early exit, S is replaced by $s_{actual}$.
 
 #### 3.5.3 `output_reducer.v`
 
 - **Path:** `rtl/stage5_cache_reduction/output_reducer.v`
-- **Purpose:** Reduces the S final-layer output vectors into a predictive mean and a per-channel variance.
+- **Purpose:** Reduces the final-layer output vectors of the Monte Carlo samples into a predictive mean and a per-channel variance. It hosts the `convergence_monitor` for early exit.
 - **Paper reference:** Section II-B, **Eq. 1** ($p(D) \approx \frac{1}{S}\sum_{s=1}^{S} p(D\mid w_s)$); Section VI-A (uncertainty and confidence metrics).
 - **Interface:**
   - Inputs: `clear`, `sample_valid`, `sample_in`, `sample_idx`, `total_samples_S`.
+  - Early-exit inputs: `early_exit_en`, `early_exit_thresh`, `early_exit_min_samples`.
   - Outputs: `mean_prediction` (`PF×PV×DATA_WIDTH`), `uncertainty_score` (`PF×PV×VAR_OUT_WIDTH`, where `VAR_OUT_WIDTH = 2·DATA_WIDTH`), `reduction_done`.
+  - Early-exit outputs: `sample_decided`, `early_exit_trigger` (both levels), `variance_delta`.
 - **Datapath:**
-  - **States:** `RED_ACCUM` → `RED_LOAD` → `RED_DIV` → `RED_FINAL` → `RED_DONE`.
+  - **States:** `RED_ACCUM` → `RED_LOAD` → `RED_DIV` → `RED_FINAL` → `RED_DONE`. Early exit adds `RED_EVAL` → `RED_DECIDE`.
   - **Accumulate:** per channel, `sum += x` (24-bit signed) and `sum_sq += x²` (32-bit).
-  - **Start of division:** when the vector of sample S arrives (`sample_idx == total_samples_S`), the totals are loaded into the dividers.
-  - **Division by S:** each channel has two bit-serial restoring dividers sharing the divisor S. They run for `VAR_ACCUM_WIDTH` = 32 cycles, which avoids PF×PV wide combinational dividers. The mean divides the magnitude and the sign is restored afterwards.
-  - **Results:** $\text{Mean} = \operatorname{trunc}(\sum x / S)$ and $\text{Var} = \lfloor \sum x^2 / S \rfloor - \text{Mean}^2$.
+  - **When to divide:**
+    - Baseline: only when the vector of sample S arrives.
+    - Early exit: after **every** sample, dividing by the number of samples s seen so far, so the running statistics are always exact.
+  - **Division:** each channel has two bit-serial restoring dividers sharing the divisor. They run for `VAR_ACCUM_WIDTH` = 32 cycles, which avoids PF×PV wide combinational dividers. The mean divides the magnitude and the sign is restored afterwards.
+  - **Results:** $\text{Mean} = \operatorname{trunc}(\sum x / s)$ and $\text{Var} = \lfloor \sum x^2 / s \rfloor - \text{Mean}^2$.
+  - **Early-exit decision:** for s < S, `RED_EVAL` hands the running variance to the monitor and `RED_DECIDE` reads its verdict. "Converged" finalizes the results with $s_{actual} = s$; otherwise accumulation continues. Sample S always finalizes directly.
   - `reduction_done` is set and held until the next `clear`.
-- **Precision:** Truncating the mean toward zero guarantees $\text{Mean}^2 \le \lfloor\sum x^2/S\rfloor$, so the variance is never negative. The result is integer-precision; for example, samples {1, 2} give a variance of 1, not 0.25. The variance of INT8 data is at most $2^{14}$, so 16 bits are enough.
+- **Precision:** Truncating the mean toward zero guarantees $\text{Mean}^2 \le \lfloor\sum x^2/s\rfloor$, so the variance is never negative. The result is integer-precision; for example, samples {1, 2} give a variance of 1, not 0.25. The variance of INT8 data is at most $2^{14}$, so 16 bits are enough.
 - **Uncertainty metric:** The paper evaluates uncertainty with predictive entropy (aPE) and ECE on softmax outputs computed in software. The variance here is a hardware-friendly proxy computed directly on the INT8 logits.
 - **Assumption:** each sample contributes exactly one vector, i.e. the final layer outputs one logit vector per sample.
 
 #### 3.5.4 `cache_reduction_engine.v`
 
 - **Path:** `rtl/stage5_cache_reduction/cache_reduction_engine.v`
-- **Purpose:** Top level of Stage 5. It integrates the controller, the IC buffer with its replay path, and the reducer.
+- **Purpose:** Top level of Stage 5. It integrates the controller, the IC buffer with its write and replay paths, the reducer, and the three UAMH innovations.
 - **Paper reference:** Section IV-B, Fig. 11(c); Eq. 1.
 - **Interface:**
   - Stage 4 inputs: `premask_features_in` / `premask_valid_in` (cached) and `stage4_features_in` / `stage4_valid_in` (reduced).
-  - Replay interface: `ic_rd_req`, `replay_mask_load`, `mask_in`, `mask_valid`, `replay_mask_pop`, `replay_features`, `replay_valid`, `ic_word_count`, `ic_full`.
+  - Replay interface: `ic_rd_req`, `replay_mask_load`, `mask_in`, `mask_valid`, `replay_mask_pop`, `replay_features`, `replay_valid`, `ic_word_count` (lines), `ic_byte_count`, `ic_full`.
+  - UAMH control, spill path and telemetry ([Section 4](#4-uamh-innovations-rtluamh)).
   - Outputs: the controller flags and the reduction results.
 - **Datapath:**
-  - **Write pointer:** `wr_ptr` advances on `ic_write_en && premask_valid_in && !ic_full`. It resets on `run_start` and doubles as the cached word count.
-  - **Read pointer:** `rd_ptr` advances on `ic_read_en && ic_rd_req && rd_ptr < wr_ptr`. It resets on `run_start` and on every `layer_done`, so every replay starts at word 0 and replays exactly the cached words, in the order they were written.
-  - **Replay dropout:** a second instance of `dropout_engine` (`u_replay_dropout`) sits on the BRAM read data, with `mcd_en = ic_read_en`. On `replay_mask_load` it pops a fresh mask, which applies MCD to the cached data for samples 2..S. Replay latency is 2 cycles: BRAM 1 + dropout 1.
+  - **Mode latch:** `umps_on` and `utag_on` are latched at `run_start`, so every line is decoded and replayed the way it was written.
+  - **Write path:**
+    - Baseline: `ic_write_en && premask_valid_in` writes the full 64-byte line directly.
+    - When UMPS or U-Tagging is on: the line goes through `variance_analyzer` → `umps_packer` / `uncertainty_tagger` (2 cycles), and `u_tag_manager` decides whether to admit it.
+  - **Pointers** now live inside `ic_buffer`. Write pointers reset on `run_start`; read pointers reset on `run_start` and on every `layer_done`, so every replay starts at the first line.
+  - **Read path:**
+    - Baseline: `ic_read_en && ic_rd_req` reads the next line.
+    - UMPS: `umps_unpacker` adds 1 cycle.
+    - U-Tagging: a sequencer walks the line directory and merges IC lines with lines returned from DRAM, in their original order.
+  - **Replay dropout:** a second instance of `dropout_engine` (`u_replay_dropout`) sits on the replay stream, with `mcd_en = ic_read_en`. On `replay_mask_load` it pops a fresh mask, which applies MCD to the cached data for samples 2..S. Baseline replay latency is 2 cycles: BRAM 1 + dropout 1.
   - **Reducer feed:** the reducer receives Stage 4 output when `is_final_layer && stage4_valid_in`, and is cleared on `run_start`.
 
 ---
@@ -545,13 +603,24 @@ Pipeline latencies quoted below are in clock cycles. "Issue" means the cycle in 
   - Results: `mean_prediction`, `uncertainty_score`, `reduction_done`.
   - Egress: `layer_features_out`, `layer_features_valid`, `layer_done`.
   - `pool_win_done` and `pool_step` are generated internally rather than taken as ports (see below).
+  - UAMH control:
+    - UMPS: `umps_en`, `umps_thresh`.
+    - U-Tagging: `utag_en`, `utag_zero_thresh`, `utag_high_count_th`.
+    - Early exit: `early_exit_en`, `early_exit_thresh`, `early_exit_min_samples`.
+  - UAMH outputs:
+    - Cache usage: `ic_lines_cached`, `ic_bytes_used`.
+    - Spill egress: `ic_spill_data`, `ic_spill_valid`.
+    - U-Tagging telemetry: `high_u_cached_count`, `low_u_bypassed_count`, `current_line_u_tag`.
+    - Early-exit telemetry: `early_exit_triggered`, `samples_executed`.
+    - `eval_pending`: an early-exit decision is pending for the sample that just finished. The host pushes the next layer's weights only after it clears and `busy` is still high, otherwise a cancelled sample would leave a stale weight word behind.
+  - Parameters `IC_RAM_DEPTH` / `IC_ADDR_WIDTH` size the IC (defaults: the package macros). A smaller IC models a BRAM-constrained device; `tb_uamh_top.v` uses 8 rows.
 
 **Controller FSM (one pass per layer):**
 
 | State | Action |
 |---|---|
 | `S_IDLE` | Wait for `start_inference` (Stage 5 latches the configuration on the same edge). |
-| `S_LAYER` | If Stage 5 is no longer busy → `S_IDLE`. Otherwise select the input source: `src_replay = ic_read_en`. For a replay, first wait for a mask in the FIFO, then pulse `replay_mask_load`. Pulse `start_ingress`. |
+| `S_LAYER` | If Stage 5 is no longer busy → `S_IDLE`. While Stage 5 has an early-exit decision pending (`eval_pending`), wait, so no further data or weights are fetched for a sample that may be cancelled. Otherwise select the input source: `src_replay = ic_read_en`. For a replay, first wait for a mask in the FIFO, then pulse `replay_mask_load`. Pulse `start_ingress`. |
 | `S_INGRESS` | Wait for `ingress_done`. |
 | `S_ARM` | For an MCD layer, wait for `mask_valid`. Toggle `ping_pong_sel` so the RAG reads the bank just written, then pulse `start_compute`. The same pulse is Stage 4's `mask_load`. |
 | `S_COMPUTE` | Wait for the RAG `layer_done` (last read issued). |
@@ -562,7 +631,8 @@ Pipeline latencies quoted below are in clock cycles. "Issue" means the cycle in 
 
 1. **Ingress source multiplexer (IC replay).**
    - `src_replay = 0`: Stage 1 ingests `dram_data_in`.
-   - `src_replay = 1`, i.e. layer N−B+1 of samples 2..S: Stage 1 ingests `replay_features`. The ingress engine's `dram_ready` becomes `ic_rd_req`, and `dram_data_ready` is held low externally, so the host sees no request. Stage 5 blocks reads beyond the cached word count, so requests in flight past the end are harmless.
+   - `src_replay = 1`, i.e. layer N−B+1 of samples 2..S: Stage 1 ingests `replay_features`. The ingress engine's `dram_ready` becomes `ic_rd_req`. Stage 5 blocks reads beyond the cached word count, so requests in flight past the end are harmless.
+   - During a replay layer, `dram_data_ready` reflects only Stage 5's `spill_req`. With U-Tagging off this is always 0, so the host sees no request. With U-Tagging on, the host answers each request with the next spilled line on `dram_data_in`.
 2. **Mask-pop arbitration.** `sampler_mask_pop = (ic_read_en && state != S_COMPUTE) ? replay_mask_pop : stage4_mask_pop`. The replay pop happens during the replay ingress and Stage 4's pop happens at the start of compute, so the two never collide. Arbitrating on the replay *phase* rather than on `ic_read_en` alone keeps Stage 4's pop available during the compute of layer N−B+1, which matters when B ≥ 2.
 3. **Weight reuse (Fig. 8 "flow back").**
    - `single_step_window = (KH==1 && KW==1 && C_tiles==1 && (!mode_3d || KL==1))`.
@@ -577,9 +647,120 @@ Pipeline latencies quoted below are in clock cycles. "Issue" means the cycle in 
 
 ---
 
-## 4. Verification Suite & Results
+## 4. UAMH Innovations (`rtl/UAMH/`)
 
-All testbenches are self-checking and print a final pass/fail banner. Stimulus is driven on the **falling** clock edge; driving on the rising edge raced the DUT in early versions and hid timing bugs. The clock is `always #2.27 clk = ~clk` (4.54 ns, about 220 MHz). Every result below comes from a fresh `iverilog` build of the current sources.
+The baseline caches layer N−B at full INT8 precision, treats every cached pixel the same, and always runs all S Monte Carlo samples. The three UAMH innovations make the IC buffer and the sample loop react to the data, building on the paper's IC (Section IV-B), its memory model (Section V-B: on-chip memory is the limiting resource) and Eq. 1:
+
+| # | Innovation | Saves | Enable | Files |
+|---|---|---|---|---|
+| 1 | Uncertainty-Modulated Precision Storage (UMPS) | IC memory (up to 2×) | `umps_en` | `variance_analyzer.v`, `umps_packer.v`, `umps_unpacker.v`, `ic_buffer.v` |
+| 2 | Closed-Loop Early-Exit Sample Throttling | Monte Carlo passes (latency, DRAM traffic, energy) | `early_exit_en` | `convergence_monitor.v`, `output_reducer.v`, `mc_sample_controller.v` |
+| 3 | Uncertainty-Tagged Cache Lines (U-Tagging) | On-chip capacity for informative pixels on small-BRAM devices | `utag_en` | `uncertainty_tagger.v`, `u_tag_manager.v`, `ic_buffer.v`, `cache_reduction_engine.v` |
+
+Common rules:
+- **Default off.** Every enable defaults to 0 in the existing testbenches. When off, each innovation's logic is bypassed and timing is identical to the baseline.
+- **Latched per inference.** Each enable is latched at `start_inference`, so a cached line is always decoded and replayed the way it was written.
+- **Combinable.** UMPS and U-Tagging share the analyzer stage. Early exit is independent of both.
+
+### 4.1 Innovation 1 — Uncertainty-Modulated Precision Storage (UMPS)
+
+**Idea.** Many cached activations are small (after ReLU, most are near zero). A channel that fits the signed INT4 range [−8, +7] loses nothing when stored in 4 bits. When both channels of a pair (2k, 2k+1) fit, they share one byte, so the line shrinks from 64 bytes to as few as 32.
+
+**Why a magnitude test, not a variance test.** Layer N−B is deterministic: its output is identical in every Monte Carlo sample, and it is cached during sample 1, before any sample-to-sample variance exists. The per-pixel channel magnitude is therefore used as the activity proxy. A channel is marked low only if it also fits INT4, so the truncation is **always lossless**; τ (`umps_thresh`) can only make the test stricter.
+
+#### `rtl/UAMH/variance_analyzer.v`
+- **Interface:** `valid_in`, `features_in`, `thresh_in` (τ) → `is_low_var` (1 bit per channel), `features_out` (registered copy), `valid_out`.
+- **Logic:** `is_low_var[f] = (−8 ≤ val ≤ 7) && (−τ ≤ val ≤ τ)`, evaluated with one guard bit so −128 and −τ never overflow. **Latency:** 1 cycle.
+
+#### `rtl/UAMH/umps_packer.v`
+- **Interface:** `valid_in`, `umps_en`, `is_low_var`, `features_in` → `packed_features_out`, `pack_mask_out`, `packed_len_out`, `valid_out`.
+- **Logic:** walks the pairs in order k = 0 … 31, appending each at a running byte position:
+  - a packed pair emits one byte, `{ch[2k+1][3:0], ch[2k][3:0]}`;
+  - any other pair emits `ch[2k]` and `ch[2k+1]` as two bytes.
+- `pack_mask_out[2k] = pack_mask_out[2k+1] = 1` for packed pairs, and the line length is 32–64 bytes. With `umps_en = 0` the line passes through at 64 bytes with an all-zero mask. **Latency:** 1 cycle.
+
+#### `rtl/UAMH/umps_unpacker.v`
+- **Interface:** `valid_in`, `pack_mask_in`, `packed_features_in` → `unpacked_features_out`, `valid_out`.
+- **Logic:** recomputes each pair's byte position from the mask exactly as the packer did. Each nibble is sign-extended (`{{4{n[3]}}, n}`); full bytes are copied. Decoding depends only on the metadata stored with each line, so the unpacker has no enable. **Latency:** 1 cycle.
+
+#### Storage and integration
+- **Variable-length storage:** a fixed 512-bit word would save nothing, so `ic_buffer.v` was rebuilt to store variable-length lines back to back (3.5.1). The IC memory size is unchanged; the number of lines it can hold rises up to 2×.
+- **Precision metadata:** one bit per pair (32 bits per line) is kept alongside the data.
+- **Path:** write `variance_analyzer` → `umps_packer` → `ic_buffer`; read `ic_buffer` → `umps_unpacker` → replay dropout. Both are bypassed when UMPS is off.
+- **Telemetry:** `ic_lines_cached` and `ic_bytes_used`; the compression ratio is `ic_lines_cached × 64 / ic_bytes_used`.
+
+### 4.2 Innovation 2 — Closed-Loop Early-Exit Sample Throttling
+
+**Idea.** For an unambiguous input, the predictive distribution settles after a few passes, and running the remaining samples is wasted work. The hardware measures how much the running per-channel variance changes per pass. Once it stays within ε for K consecutive passes (after a warm-up of $S_{min}$), the loop stops and the results are finalized over the samples actually run.
+
+$$\Delta\sigma^2_s = \max_f \left|\sigma^2_s[f] - \sigma^2_{s-1}[f]\right|, \qquad \text{exit when } \Delta\sigma^2 \le \varepsilon \text{ for } K \text{ consecutive passes with } s \ge S_{min}$$
+
+#### `rtl/UAMH/convergence_monitor.v`
+- **Interface:**
+  - Inputs: `clear`, `sample_valid`, `sample_idx`, `current_variance`, `early_exit_en`, `early_exit_thresh` (ε), `min_samples` ($S_{min}$).
+  - Outputs: `early_exit_trigger` (1-cycle pulse), `variance_delta_out` (saturated $\Delta\sigma^2$).
+- **Logic:**
+  - Keeps the previous pass's variance vector, computes the largest per-channel absolute change, and counts consecutive stable passes.
+  - The first pass after `clear` has no predecessor and is never stable.
+  - The trigger fires on the pass that brings the count to `CONV_STABILITY_COUNT` (K).
+
+#### Changes in Stage 5
+- **`output_reducer.v`:** with early exit on, the exact running mean and variance are recomputed after **every** sample by dividing by s, so a stop at $s_{actual}$ needs no further correction. It then runs the monitor (`RED_EVAL` / `RED_DECIDE`) and reports `sample_decided` and `early_exit_trigger`.
+- **`mc_sample_controller.v`:** when layer N of a sample s < S finishes, it raises `eval_pending` and holds the sample until the decision. "Converged" ends the inference at once (`inference_done`, `early_exit_triggered`); otherwise sample s+1 starts.
+- **`bcnn_top.v`:** the layer controller waits in `S_LAYER` while `eval_pending` is high, so no weights or replay data are fetched for a sample that may be cancelled.
+
+#### Why the controller waits
+The reducer's divider takes about 35 cycles, but the next sample's layer would otherwise start a few cycles after `layer_done`. Waiting costs about 40 cycles per sample and only when early exit is enabled. That is small compared with a layer's compute time, and it is what makes the exit take effect immediately.
+
+**Telemetry:** `samples_executed` ($s_{actual}$) and `early_exit_triggered`.
+
+### 4.3 Innovation 3 — Uncertainty-Tagged Cache Lines (U-Tagging)
+
+**Idea.** On a device whose IC buffer is smaller than the layer N−B map, the baseline silently drops whatever does not fit. U-Tagging grades each line by information content. Under memory pressure, flat background lines are spilled to DRAM so on-chip capacity stays available for informative lines. Every spilled line is brought back during replay, so results are unchanged.
+
+#### `rtl/UAMH/uncertainty_tagger.v`
+- **Interface:** `valid_in`, `features_in`, `is_low_var`, `zero_thresh`, `high_count_thresh` → `u_tag_out`, `valid_out`.
+- **Logic:** `active` counts channels with \|val\| > `zero_thresh`; `high` counts channels that need INT8 precision.
+  - `active == 0` → `UTAG_ZERO` (flat background).
+  - otherwise `high ≥ high_count_thresh` → `UTAG_HIGH` (wide dynamic range).
+  - otherwise → `UTAG_LOW` (confident, well bounded).
+- `UTAG_PINNED` is reserved: it is never generated here and is never filtered. The tagger runs alongside the packer, so its tag is aligned with the packed line.
+
+#### `rtl/UAMH/u_tag_manager.v`
+- **Interface:**
+  - Inputs: `clear`, `utag_en`, `line_valid_in`, `u_tag_in`, `ic_occupancy`, `ic_capacity`, `ic_full`.
+  - Outputs: `admit_to_bram`, `spill_to_dram`, `high_u_cached_count`, `low_u_bypassed_count`.
+- **Policy** (combinational; pressure = occupancy ≥ capacity × `UTAG_CAP_THRESH_PCT` / 100):
+
+| Condition | Decision |
+|---|---|
+| `utag_en = 0` | admit while not full; never spill (baseline) |
+| pressure and tag = `UTAG_ZERO` | spill |
+| not full | admit |
+| full | spill, `UTAG_HIGH` included (resident lines are never evicted) |
+
+- **Units:** occupancy is measured in **bytes**, so UMPS compression is taken into account.
+- **Telemetry:** the counters saturate and clear at inference start. `high_u_cached_count` counts admitted HIGH lines; `low_u_bypassed_count` counts spilled ZERO and LOW lines.
+
+#### Spill round trip (in `cache_reduction_engine.v`)
+A spilled line has to come back, otherwise replay would give layer N−B+1 fewer pixels than it needs. The DRAM egress of layer N−B cannot be reused, because it already carries sample 1's dropout mask.
+1. **Spill:** a line that is not admitted leaves on `ic_spill_data` / `ic_spill_valid` as **unmasked INT8**, in order.
+2. **Directory:** a 1-bit-per-line directory (`RAM_DEPTH` entries, since a replayed map must fit Stage 1's data buffer) records whether each line is resident or spilled.
+3. **Replay:** a sequencer walks the lines in their original order.
+   - Resident lines are read from the IC.
+   - For a spilled line, `spill_req` raises `dram_data_ready`, and the host returns the next spilled line on `dram_data_in`.
+   - A spilled line is only requested once all earlier IC reads have landed, so order is preserved. All-resident runs keep full speed.
+   - Both kinds pass through the replay dropout, so every sample is re-masked as usual.
+
+**Telemetry:** `high_u_cached_count`, `low_u_bypassed_count`, `current_line_u_tag` (tag of the last line replayed from the IC).
+
+**When it matters:** with the default sizes (`IC_RAM_DEPTH` = `RAM_DEPTH` = 1024 rows), the IC can always hold the largest replayable map, so admission filtering never activates. U-Tagging targets builds where `IC_RAM_DEPTH` is set smaller to save BRAM.
+
+---
+
+## 5. Verification Suite & Results
+
+All testbenches are self-checking and print a final pass/fail banner. The Stage 5 and system testbenches tie every UAMH enable to 0, so they double as the "UAMH off = baseline" regression. Stimulus is driven on the **falling** clock edge; driving on the rising edge raced the DUT in early versions and hid timing bugs. The clock is `always #2.27 clk = ~clk` (4.54 ns, about 220 MHz). Every result below comes from a fresh `iverilog` build of the current sources.
 
 | # | Testbench | Test cases | Status | Key empirical result |
 |---|---|---|---|---|
@@ -589,8 +770,9 @@ All testbenches are self-checking and print a final pass/fail banner. Stimulus i
 | 4 | `tb_functional_engine.v` | (1) reset; (2) SC addition and saturation; (3) 2×2 max pool; (4) 2×2 avg pool; (5) Stage 2 + Stage 4 filter-wise dropout | **PASS** (0 errors) | 20+15 = 35, 100+50 → **127**; max(10,45,30,22) = **45**; avg(12,24,36,48) = **30**; the same mask holds across 2 pixels (50, −30) with exactly 1 pop |
 | 5 | `tb_cache_reduction_engine.v` | (1) reset; (2) IC caching at layer N−B, sample 1 (N=3, B=1); (3) IC replay, raw and re-masked; (4) reduction over S=4; (5) second inference N=4, B=2, S=3 | **PASS** (0 errors) | Mean(10,20,30,40) = **25**, Var = **125**; Ch1 = −25/125; all 64 channels bit-exact; trace 1-2-3-4 \| 3-4 \| 3-4 → 8 layers vs 12 |
 | 6 | `tb_bcnn_top.v` | (1) reset; (2) layer 1 from DRAM; (3) layer 2 with IC caching and mask 1; (4) samples 2–3 replayed from IC; (5) reduction, layer count, DRAM traffic | **PASS** (0 errors) | **5 layers instead of 9**; **12 DRAM beats instead of 36**; mean and variance **bit-exact on all 64 channels**, all non-zero |
+| 7 | `tb_uamh_top.v` | (1) baseline parity, all innovations off; (2) UMPS; (3) U-Tagging with spill and replay; (4) early exit; (5) all three together | **PASS** (0 errors) | UMPS **2.00×**; U-Tagging spills 8 of 16 lines (6 with UMPS) and replays all of them in order; early exit after **7 of 10** and **5 of 10** samples; everything bit-exact against the golden models ([5.4](#54-unified-uamh-system-test-tb_uamh_topv)) |
 
-### 4.1 End-to-end system test (`tb_bcnn_top.v`) in detail
+### 5.1 End-to-end system test (`tb_bcnn_top.v`) in detail
 
 - **Network:** N = 3, B = 1, S = 3. The input is 2×2×64, and each layer is a 1×1 convolution with PF = 64 filters.
   - Layer 1: conv + ReLU.
@@ -604,7 +786,7 @@ All testbenches are self-checking and print a final pass/fail banner. Stimulus i
 - **DRAM traffic:** 12 input beats instead of 36 (3 of 9 layer executions read off-chip).
 - **Reduction:** `reduction_done = 1`. The mean and variance match the golden model **bit for bit on all 64 channels**, and every channel has a non-zero mean and variance (e.g. Ch0: mean 6, variance 40; Ch1: mean 9, variance 15). The monitors also check that `ic_write_en` is only ever high at (sample 1, layer N−B) and that `bypass_feature_extractor == (sample > 1)` throughout.
 
-### 4.2 Bugs found and fixed through verification
+### 5.2 Bugs found and fixed through verification
 
 | Module | Bug | Fix |
 |---|---|---|
@@ -617,18 +799,64 @@ All testbenches are self-checking and print a final pass/fail banner. Stimulus i
 | `functional_engine.v` | No pre-dropout tap for IC | `premask_features_out` / `premask_valid_out` |
 | Stage 1/2/4 testbenches | Rising-edge stimulus races; Stage 2 read `mask_out` after the pop (counted empty-FIFO zeros, giving p = 0.23) | Falling-edge stimulus; read the head word, then pop for one cycle and wait for `mask_valid` |
 
+### 5.3 UAMH innovations — regression with the innovations off
+
+`tb_cache_reduction_engine.v` and `tb_bcnn_top.v` tie every UAMH enable to 0, and pass with **0 errors** after each innovation was added. Test 1 of `tb_uamh_top.v` repeats this check on a DUT built with the constrained IC. Together these confirm the bypass paths.
+
+During development, each innovation was also checked on its own at Stage 5 level with standalone simulations kept outside the repository: UMPS line packing (1.28× on mixed data, lines spanning two rows), U-Tagging admission and spill-replay order, and the early-exit decision for ε = 4 and ε = 40. `tb_uamh_top.v` now covers all of these at system level.
+
+### 5.4 Unified UAMH system test (`tb_uamh_top.v`)
+
+**Purpose:** validate the three innovations on the complete chip (`bcnn_top.v`), first individually and then together, against bit-exact golden models.
+
+**DUT:** `bcnn_top #(.IC_RAM_DEPTH(8), .IC_ADDR_WIDTH(3))`, a **512-byte IC** (8 full-length lines) that makes memory pressure reachable.
+
+**Networks:**
+
+| Network | Shape | Layers | Used by |
+|---|---|---|---|
+| A | N = 3, B = 1, 2×2×64 input | the three 1×1 conv layers of `tb_bcnn_top.v`; layer 3 ends in a global 2×2 average pool. The 4 cached lines always fit the IC | Tests 1, 2, 4 |
+| B | N = 4, B = 2, 4×4×64 input | layers 1–2 are identity 1×1 convolutions, so the input image directly sets each of the **16 cached lines**: 6 high-activity (H), 5 low-activity (L), 5 flat (Z), in the order H L Z H L H Z L Z H Z L H Z L H. Layer 3 pools 16 → 4 pixels, layer 4 pools 4 → 1 | Tests 3, 5 |
+
+**Host and DRAM model:**
+- Streams each layer's input (the captured egress of the previous layer) and pushes one weight window per layer execution.
+- **Spill return:** stores every `ic_spill_valid` beat in `dram_spill_mem` in order. During replay layers, whenever `dram_data_ready` requests a line, it returns the next stored one on `dram_data_in` with `dram_data_valid`.
+- **Weight pacing:** after each `layer_done` it waits for `eval_pending` to clear, and pushes the next layer's weights only if `busy` shows another layer will run. A monitor flags any layer whose compute starts before its weights are present.
+
+**Checks** (every test, on top of the per-test criteria below):
+1. **Every executed (sample, layer) step** matches a golden conv → quantize → ReLU → pool → MCD model, using the dropout masks actually popped from Stage 2. Masks are captured per (sample, layer) from Stage 4 pops and replay pops.
+2. **Every replayed line** equals the unmasked layer N−B output under that sample's replay mask. This covers UMPS unpacking and spilled lines returned from DRAM.
+3. **Off-chip traffic per layer:** DRAM input beats for normal layers; spill returns (and no normal DRAM beats) for replay layers.
+4. **Telemetry:** `ic_lines_cached`, `ic_bytes_used`, `high_u_cached_count` and `low_u_bypassed_count` match a golden UMPS / U-Tagging admission model.
+5. **Early exit:** the exit point, `samples_executed`, `early_exit_triggered`, and the final mean and variance (divided by $s_{actual}$) match a golden convergence model. Exactly one `inference_done` pulse.
+6. **Non-degenerate prediction:** at least half of the 64 channels have non-zero variance, so the masks demonstrably shape the output.
+
+**Results** (all PASS, 0 errors):
+
+| Test | Settings | Criteria | Measured |
+|---|---|---|---|
+| 1 Baseline parity | all off; network A; S = 3 | (N−B) + B·S layers, no spills, no compression, bit-exact | 5 layers (naive 9); 4 lines in 256 bytes; Ch0 mean 6 / var 40; 64/64 channels non-zero |
+| 2 UMPS | `umps_en = 1`, τ = 16; network A with small layer-2 activations; S = 3 | ≥ 50 % of cached channels fit INT4; `ic_bytes_used < ic_lines_cached × 64` and ≥ 1.25×; replay bit-exact | 256/256 channels fit INT4; 4 lines in **128 bytes** (**2.00×**); 8 replayed lines unpacked bit-exact |
+| 3 U-Tagging | `utag_en = 1`; network B; S = 3 | `low_u_bypassed_count > 0`, `high_u_cached_count > 0`, spills > 0, all lines replayed in order with distinct per-sample masks | 8 lines kept (512 bytes), **8 spilled**; high_u_cached = 3, low_u_bypassed = 5; 32 replayed lines checked (16 per replay sample, 8 of them returned from DRAM); 57/64 channels non-zero |
+| 4 Early exit | `early_exit_en = 1`, ε = 40, $S_{min}$ = 4; network A; S = 10 | `early_exit_triggered = 1`, `samples_executed < 10`, `reduction_done` already high at `inference_done`, results exact over $s_{actual}$ | exit after **7 of 10** samples (9 layers instead of 12); Ch0 mean 8 / var 38; 64/64 channels non-zero |
+| 5 All three | all on; network B; S = 10 | compression, fewer spills than Test 3, U-Tagging counters active, early exit taken | 10 lines in **454 bytes** (640 uncompressed); **6 spills vs 8** in Test 3; high_u_cached = 4, low_u_bypassed = 4; exit after **5 of 10** samples (12 layers instead of 22) |
+
+**How the data was chosen:** the dropout masks are consecutive 64-bit words of the LFSR stream, consumed in a fixed order. The layer shifts were therefore tuned with a Python model of that exact mask sequence, so that the predictions are non-trivial and Tests 4 and 5 converge before S. The testbench itself verifies against its own Verilog golden models, not against those Python numbers.
+
+**Run time:** about 10–15 minutes on a desktop PC. The full chip has 4,096 weight FIFOs and 4,096 multipliers, which dominate simulation time. The waveform file `sim/uamh_top_simulation.vcd` is about 156 MB; run with `+nodump` to skip it.
+
 ---
 
-## 5. Build, Simulation & Toolchain Guide
+## 6. Build, Simulation & Toolchain Guide
 
-### 5.1 Prerequisites (Windows)
+### 6.1 Prerequisites (Windows)
 
 1. **Icarus Verilog** 11 or later (`iverilog`, `vvp` on `PATH`). The Windows installer from bleyer.org/icarus adds both.
 2. **GTKWave** (bundled with the Icarus Windows installer) or **Surfer** (`surfer.exe`) to view waveforms.
 3. Run every command from the **repository root** (`BCNN_Accelerator\`). `-I rtl` resolves `` `include "bcnn_pkg.vh" `` and `-g2005-sv` selects the language level used throughout.
 4. The `sim\stage1` … `sim\stage5` folders must exist; they are in the repository. Each testbench writes its VCD there.
 
-### 5.2 Compile and run (Windows `cmd`)
+### 6.2 Compile and run (Windows `cmd`)
 
 **Stage 1 — Smart buffers**
 ```bat
@@ -654,21 +882,30 @@ iverilog -I rtl -g2005-sv -o sim/stage4/stage4_sim.out rtl/stage2_sampler/lfsr_1
 vvp sim/stage4/stage4_sim.out
 ```
 
-**Stage 5 — Cache & reduction engine** (reuses `dropout_engine.v` for replay)
+**Stage 5 — Cache & reduction engine** (reuses `dropout_engine.v` for replay; needs the six UAMH modules)
 ```bat
-iverilog -I rtl -g2005-sv -o sim/stage5/stage5_sim.out rtl/stage4_functional/dropout_engine.v rtl/stage5_cache_reduction/ic_buffer.v rtl/stage5_cache_reduction/mc_sample_controller.v rtl/stage5_cache_reduction/output_reducer.v rtl/stage5_cache_reduction/cache_reduction_engine.v test_benches/tb_cache_reduction_engine.v
+iverilog -I rtl -g2005-sv -o sim/stage5/stage5_sim.out rtl/stage4_functional/dropout_engine.v rtl/UAMH/variance_analyzer.v rtl/UAMH/umps_packer.v rtl/UAMH/umps_unpacker.v rtl/UAMH/uncertainty_tagger.v rtl/UAMH/u_tag_manager.v rtl/UAMH/convergence_monitor.v rtl/stage5_cache_reduction/ic_buffer.v rtl/stage5_cache_reduction/mc_sample_controller.v rtl/stage5_cache_reduction/output_reducer.v rtl/stage5_cache_reduction/cache_reduction_engine.v test_benches/tb_cache_reduction_engine.v
 vvp sim/stage5/stage5_sim.out
 ```
 
 **Master top — full system** (about 1 minute; the 4,096 weight FIFOs dominate run time)
 ```bat
-iverilog -I rtl -g2005-sv -o sim/bcnn_top_sim.out rtl/stage1_buffers/ram_bank.v rtl/stage1_buffers/tree_fanout.v rtl/stage1_buffers/crossbar_switch.v rtl/stage1_buffers/data_ingress_engine.v rtl/stage1_buffers/read_addr_gen.v rtl/stage1_buffers/weight_fifo.v rtl/stage1_buffers/smart_data_buffer.v rtl/stage1_buffers/smart_weight_buffer.v rtl/stage2_sampler/lfsr_128bit.v rtl/stage2_sampler/sipo_shift_reg.v rtl/stage2_sampler/mask_fifo.v rtl/stage2_sampler/bernoulli_sampler.v rtl/stage3_pe_array/multiplier_array.v rtl/stage3_pe_array/adder_tree.v rtl/stage3_pe_array/mac_unit.v rtl/stage3_pe_array/accumulator_32bit.v rtl/stage3_pe_array/linear_quantizer.v rtl/stage3_pe_array/relu_unit.v rtl/stage3_pe_array/processing_unit.v rtl/stage3_pe_array/processing_engine.v rtl/stage4_functional/sc_addition_unit.v rtl/stage4_functional/pooling_unit_2d.v rtl/stage4_functional/dropout_engine.v rtl/stage4_functional/functional_engine.v rtl/stage5_cache_reduction/ic_buffer.v rtl/stage5_cache_reduction/mc_sample_controller.v rtl/stage5_cache_reduction/output_reducer.v rtl/stage5_cache_reduction/cache_reduction_engine.v rtl/bcnn_top.v test_benches/tb_bcnn_top.v
+iverilog -I rtl -g2005-sv -o sim/bcnn_top_sim.out rtl/stage1_buffers/ram_bank.v rtl/stage1_buffers/tree_fanout.v rtl/stage1_buffers/crossbar_switch.v rtl/stage1_buffers/data_ingress_engine.v rtl/stage1_buffers/read_addr_gen.v rtl/stage1_buffers/weight_fifo.v rtl/stage1_buffers/smart_data_buffer.v rtl/stage1_buffers/smart_weight_buffer.v rtl/stage2_sampler/lfsr_128bit.v rtl/stage2_sampler/sipo_shift_reg.v rtl/stage2_sampler/mask_fifo.v rtl/stage2_sampler/bernoulli_sampler.v rtl/stage3_pe_array/multiplier_array.v rtl/stage3_pe_array/adder_tree.v rtl/stage3_pe_array/mac_unit.v rtl/stage3_pe_array/accumulator_32bit.v rtl/stage3_pe_array/linear_quantizer.v rtl/stage3_pe_array/relu_unit.v rtl/stage3_pe_array/processing_unit.v rtl/stage3_pe_array/processing_engine.v rtl/stage4_functional/sc_addition_unit.v rtl/stage4_functional/pooling_unit_2d.v rtl/stage4_functional/dropout_engine.v rtl/stage4_functional/functional_engine.v rtl/UAMH/variance_analyzer.v rtl/UAMH/umps_packer.v rtl/UAMH/umps_unpacker.v rtl/UAMH/uncertainty_tagger.v rtl/UAMH/u_tag_manager.v rtl/UAMH/convergence_monitor.v rtl/stage5_cache_reduction/ic_buffer.v rtl/stage5_cache_reduction/mc_sample_controller.v rtl/stage5_cache_reduction/output_reducer.v rtl/stage5_cache_reduction/cache_reduction_engine.v rtl/bcnn_top.v test_benches/tb_bcnn_top.v
 vvp sim/bcnn_top_sim.out
 ```
 
+**Unified UAMH testbench** (about 10–15 minutes; `+nodump` skips the 156 MB waveform file)
+```bat
+iverilog -I rtl -g2005-sv -o sim/uamh_top_sim.out rtl/stage1_buffers/*.v rtl/stage2_sampler/*.v rtl/stage3_pe_array/*.v rtl/stage4_functional/*.v rtl/stage5_cache_reduction/*.v rtl/UAMH/*.v rtl/bcnn_top.v test_benches/tb_uamh_top.v
+vvp sim/uamh_top_sim.out
+```
+If your shell does not expand the `*.v` wildcards, use the explicit file list of the master-top command above with `test_benches/tb_uamh_top.v` in place of `tb_bcnn_top.v`.
+
+Shorter equivalent for the system build: `iverilog -I rtl -g2005-sv -o sim/bcnn_top_sim.out rtl/stage1_buffers/*.v rtl/stage2_sampler/*.v rtl/stage3_pe_array/*.v rtl/stage4_functional/*.v rtl/UAMH/*.v rtl/stage5_cache_reduction/*.v rtl/bcnn_top.v test_benches/tb_bcnn_top.v`. The wildcards are expanded by Git Bash or PowerShell; plain `cmd` needs the explicit list above.
+
 Each run ends with a banner such as `ALL BCNN_TOP SYSTEM TEST CASES PASSED PERFECTLY! (0 ERRORS)`. On failure, it ends with `TESTBENCH COMPLETED WITH n ERRORS.` and prints `[ERROR]` lines naming the channel, word and expected value.
 
-### 5.3 Waveforms
+### 6.3 Waveforms
 
 | Testbench | VCD file |
 |---|---|
@@ -678,6 +915,7 @@ Each run ends with a banner such as `ALL BCNN_TOP SYSTEM TEST CASES PASSED PERFE
 | Stage 4 | `sim/stage4/stage4_simulation.vcd` |
 | Stage 5 | `sim/stage5/stage5_simulation.vcd` |
 | Top | `sim/bcnn_top_simulation.vcd` |
+| UAMH unified | `sim/uamh_top_simulation.vcd` |
 
 ```bat
 gtkwave sim/stage5/stage5_simulation.vcd
@@ -691,18 +929,21 @@ Useful signals in the system waveform:
 - **Stage 3 / 4 outputs:** `dut.pe_features_valid`, `dut.premask_valid`, `layer_features_valid`.
 - **Masks and IC:** `dut.sampler_mask_pop`, `dut.u_stage5.ic_wr`, `dut.u_stage5.ic_rd`.
 - **Results:** `reduction_done`.
+- **UAMH:** `dut.u_stage5.umps_on`, `dut.u_stage5.utag_on`, `dut.u_stage5.mgr_admit`, `dut.u_stage5.mgr_spill`, `dut.u_stage5.u_reducer.state`, `dut.s5_eval_pending`, `samples_executed`.
 
 Icarus does not dump memory arrays by default. Read BRAM contents through hierarchical references in a testbench, as `tb_bcnn_top.v` does with `dut.u_stage5.u_ic_buffer.mem[...]`.
 
-### 5.4 Writing new tests
+### 6.4 Writing new tests
 
 - Drive inputs on `@(negedge clk)` and sample DUT outputs at the falling edge, or inside `always @(posedge clk)` monitors, which see pre-update values.
 - The Stage 2 FIFO is FWFT: read `mask_out` first, then pop for exactly one cycle, and only when `mask_valid` is high.
 - At the top level, push a layer's weights between `layer_done` and the start of that layer's compute, never during compute.
+- Tie unused UAMH inputs to sized constants (e.g. a `localparam [SAMPLE_CNT_WIDTH-1:0]` for `MIN_SAMPLES_EXIT`) to avoid port-width warnings.
+- With U-Tagging on, the host must store `ic_spill_data` beats in order and, during replay layers, answer each `dram_data_ready` with the next stored line.
 
 ---
 
-## 6. Known Limitations & Deviations from the Paper
+## 7. Known Limitations & Deviations from the Paper
 
 | Area | Current behaviour | Paper / general requirement |
 |---|---|---|
@@ -719,3 +960,9 @@ Icarus does not dump memory arrays by default. Read BRAM contents through hierar
 | LFSR start-up | The first 128 bits after reset or seed load equal the seed | Load a seed and discard 128 bits for production MC runs |
 | Weight push | The host must not push weights while a layer is computing (recirculation shares the push port) | — |
 | Clock | 220 MHz in the RTL headers and testbenches | 225 MHz achieved on Arria 10 SX660 (Section VI-A) |
+| UMPS geometry | Requires `DATA_WIDTH = 2 × INT4_WIDTH` and an even, power-of-two PF × PV | — |
+| UMPS criterion | Per-pixel magnitude, lossless INT4 only (no lossy rescaling) | — |
+| U-Tagging eviction | Resident lines are never evicted; a HIGH line arriving at a full IC is spilled (and still replayed correctly) | — |
+| U-Tagging spill protocol | The host must accept every spill beat (no back-pressure) and return spilled lines in order | — |
+| Early-exit overhead | About 40 cycles per sample spent waiting for the decision, only when enabled | — |
+| UAMH verification | `tb_uamh_top.v` covers 1×1 convolutions with up to 4 layers and 16-pixel maps, and a single host spill / return protocol | Larger kernels and maps inherit the RAG and pooling limits above |

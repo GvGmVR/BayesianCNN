@@ -41,6 +41,10 @@ module tb_bcnn_top;
     localparam INT_MIN = -(1 << (DW-1));
     localparam POOL_WIN = 1 << `POOL_CNT_WIDTH;
 
+    // UAMH configuration sized to the DUT ports
+    localparam [`SAMPLE_CNT_WIDTH-1:0] EE_MIN_SAMPLES = `MIN_SAMPLES_EXIT;
+    localparam [$clog2(`PF*`PV+1)-1:0] UTAG_HIGH_COUNT = `UTAG_HIGH_COUNT_TH;
+
     // Network under test
     localparam N_RUN = 3;
     localparam B_RUN = 1;
@@ -112,12 +116,30 @@ module tb_bcnn_top;
         .sc_features_in(sc_features_in),
         .load_seed(load_seed),
         .seed_in(seed_in),
+        .umps_en(1'b0),
+        .umps_thresh(`UMPS_DEFAULT_THRESH),
+        .utag_en(1'b0),
+        .utag_zero_thresh(`UTAG_ZERO_THRESH),
+        .utag_high_count_th(UTAG_HIGH_COUNT),
+        .early_exit_en(1'b0),
+        .early_exit_thresh(`DEFAULT_EXIT_THRESH),
+        .early_exit_min_samples(EE_MIN_SAMPLES),
         .mean_prediction(mean_prediction),
         .uncertainty_score(uncertainty_score),
         .reduction_done(reduction_done),
         .layer_features_out(layer_features_out),
         .layer_features_valid(layer_features_valid),
-        .layer_done(layer_done)
+        .layer_done(layer_done),
+        .ic_lines_cached(),
+        .ic_bytes_used(),
+        .ic_spill_data(),
+        .ic_spill_valid(),
+        .high_u_cached_count(),
+        .low_u_bypassed_count(),
+        .current_line_u_tag(),
+        .early_exit_triggered(),
+        .samples_executed(),
+        .eval_pending()
     );
 
     always #2.27 clk = ~clk;

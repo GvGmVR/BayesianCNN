@@ -15,6 +15,10 @@
 //   - total_layers_N     : Number of layers N (must be >= 1).
 //   - bayesian_layers_B  : Number of Bayesian layers B (clamped to N).
 //   - total_samples_S    : Number of MC samples S (0 is treated as 1).
+//   - early_exit_en      : UAMH Innovation 2 enable, latched at inference start.
+//   - eval_done          : output_reducer's convergence decision for the current
+//                          sample is ready.
+//   - early_exit_trigger : That decision is "converged" (valid with eval_done).
 //
 // Architectural Outputs:
 //   - sample_idx         : Current MC sample, 1..S (0 when idle).
@@ -27,7 +31,13 @@
 //   - bypass_feature_extractor : High for samples 2..S (layers 1..N-B skipped).
 //   - mcd_en             : Stage 4 MCD enable, outputs of layers N-B..N-1.
 //   - is_final_layer     : High while layer N is executing.
-//   - inference_done     : 1-cycle strobe when layer N of sample S finishes.
+//   - inference_done     : 1-cycle strobe when layer N of sample S finishes, or
+//                          when an early exit is taken.
+//   - early_exit_active  : Latched early_exit_en for this inference.
+//   - eval_pending       : Waiting for the convergence decision; the system must
+//                          not start the next layer while this is high.
+//   - samples_executed   : Monte Carlo passes completed so far (final s_actual).
+//   - early_exit_triggered : The inference stopped before sample S.
 //
 // Description:
 //   Sample 1 runs layers 1..N. Every later sample resumes directly at layer
@@ -35,6 +45,11 @@
 //   once, saving (N-B) x (S-1) layer evaluations. With B = N there is nothing
 //   to cache and every sample restarts at layer 1. With B = 0 all passes are
 //   identical, so a single sample is run.
+//   Early exit: when layer N of a sample s < S finishes, the controller holds
+//   the current layer/sample (eval_pending) until output_reducer has updated the
+//   running statistics and decided. "Converged" ends the inference at s_actual = s;
+//   otherwise sample s+1 starts. With early_exit_en = 0 nothing waits and the
+//   sequencing is the baseline one.
 //==============================================================================
 
 `include "bcnn_pkg.vh"
@@ -50,6 +65,11 @@ module mc_sample_controller #(
     input wire [LAYER_CNT_WIDTH-1:0] bayesian_layers_B,
     input wire [SAMPLE_CNT_WIDTH-1:0] total_samples_S,
 
+    // Early exit (UAMH Innovation 2)
+    input wire early_exit_en,
+    input wire eval_done,
+    input wire early_exit_trigger,
+
     // Progress
     output reg [SAMPLE_CNT_WIDTH-1:0] sample_idx,
     output reg [LAYER_CNT_WIDTH-1:0] layer_idx,
@@ -63,7 +83,13 @@ module mc_sample_controller #(
     output wire bypass_feature_extractor,
     output wire mcd_en,
     output wire is_final_layer,
-    output reg inference_done
+    output reg inference_done,
+
+    // Early-exit status
+    output reg early_exit_active,
+    output reg eval_pending,
+    output reg [SAMPLE_CNT_WIDTH-1:0] samples_executed,
+    output reg early_exit_triggered
 );
 
     localparam [SAMPLE_CNT_WIDTH-1:0] FIRST_SAMPLE = 1;
@@ -94,6 +120,10 @@ module mc_sample_controller #(
             layer_idx <= {LAYER_CNT_WIDTH{1'b0}};
             busy <= 1'b0;
             inference_done <= 1'b0;
+            early_exit_active <= 1'b0;
+            eval_pending <= 1'b0;
+            samples_executed <= {SAMPLE_CNT_WIDTH{1'b0}};
+            early_exit_triggered <= 1'b0;
         end else begin
             inference_done <= 1'b0;
 
@@ -104,13 +134,41 @@ module mc_sample_controller #(
                 sample_idx <= FIRST_SAMPLE;
                 layer_idx <= FIRST_LAYER;
                 busy <= 1'b1;
+                early_exit_active <= early_exit_en;
+                eval_pending <= 1'b0;
+                samples_executed <= {SAMPLE_CNT_WIDTH{1'b0}};
+                early_exit_triggered <= 1'b0;
+            end else if(busy && eval_pending) begin
+                // Convergence decision for the sample that just finished
+                if(eval_done) begin
+                    eval_pending <= 1'b0;
+                    if(early_exit_trigger) begin
+                        sample_idx <= {SAMPLE_CNT_WIDTH{1'b0}};
+                        layer_idx <= {LAYER_CNT_WIDTH{1'b0}};
+                        busy <= 1'b0;
+                        inference_done <= 1'b1;
+                        early_exit_triggered <= 1'b1;
+                    end else begin
+                        sample_idx <= sample_idx + 1'b1;
+                        layer_idx <= det_layers + FIRST_LAYER;
+                    end
+                end
             end else if(busy && layer_done) begin
+                if(layer_idx == cfg_N) begin
+                    samples_executed <= sample_idx;
+                end
+
                 if(layer_idx != cfg_N) begin
                     layer_idx <= layer_idx + 1'b1;
                 end else if(sample_idx != num_samples) begin
-                    // Next MC sample skips layers 1..N-B and is fed from the IC buffer
-                    sample_idx <= sample_idx + 1'b1;
-                    layer_idx <= det_layers + FIRST_LAYER;
+                    if(early_exit_active) begin
+                        // Hold here until output_reducer decides whether to stop
+                        eval_pending <= 1'b1;
+                    end else begin
+                        // Next MC sample skips layers 1..N-B and is fed from the IC buffer
+                        sample_idx <= sample_idx + 1'b1;
+                        layer_idx <= det_layers + FIRST_LAYER;
+                    end
                 end else begin
                     sample_idx <= {SAMPLE_CNT_WIDTH{1'b0}};
                     layer_idx <= {LAYER_CNT_WIDTH{1'b0}};

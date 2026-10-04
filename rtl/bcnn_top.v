@@ -21,14 +21,35 @@
 //   - weight_push, weight_din       : Layer weights (PC x PF bytes per word).
 //   - sc_features_in        : Cached input for ResNet shortcut addition.
 //   - load_seed, seed_in    : Stage 2 LFSR re-seeding.
+//   - umps_en, umps_thresh  : UAMH Innovation 1 (UMPS) enable and activity
+//                             threshold; tie umps_en to 0 for baseline behaviour.
+//   - utag_en, utag_zero_thresh, utag_high_count_th : UAMH Innovation 3
+//                             (U-Tagging) enable and tag thresholds; tie utag_en
+//                             to 0 for baseline behaviour.
+//   - early_exit_en, early_exit_thresh, early_exit_min_samples : UAMH
+//                             Innovation 2 (early exit) enable, tolerance and
+//                             warm-up; tie early_exit_en to 0 for baseline behaviour.
 //
 // Architectural Outputs:
 //   - busy, inference_done  : Inference status.
-//   - dram_data_ready       : Ingress ready (low while the IC buffer feeds Stage 1).
+//   - dram_data_ready       : Ingress ready. During an IC replay layer it instead
+//                             requests the next spilled line (U-Tagging).
 //   - weight_full           : Weight buffer full.
 //   - mean_prediction, uncertainty_score, reduction_done : Eq. 1 results.
 //   - layer_features_out, layer_features_valid : Layer output egress to DRAM.
 //   - layer_done            : 1-cycle strobe once a layer has fully drained.
+//   - ic_lines_cached, ic_bytes_used : UMPS telemetry, IC lines (pixels) cached
+//                             and bytes of IC storage they occupy.
+//   - ic_spill_data, ic_spill_valid : Layer N-B lines not admitted on-chip
+//                             (unmasked INT8), to be stored off-chip in order and
+//                             returned on dram_data_in when dram_data_ready asks.
+//   - high_u_cached_count, low_u_bypassed_count, current_line_u_tag :
+//                             U-Tagging telemetry.
+//   - early_exit_triggered, samples_executed : Early-exit telemetry; the
+//                             inference stopped before S, after s_actual passes.
+//   - eval_pending          : Early-exit decision pending for the sample that just
+//                             finished; the host must not push the next layer's
+//                             weights until it clears and busy is still high.
 //
 // Description:
 //   Every layer runs as: ingress -> compute -> drain -> advance (Sec. III-A).
@@ -40,6 +61,8 @@
 //   every output pixel by recirculating the weight FIFO (Sec. III-B).
 //   pool_step / pool_win_done are generated here from the PE output stream:
 //   consecutive POOL_WIN_SIZE pixels form one pooling window.
+//   IC_RAM_DEPTH / IC_ADDR_WIDTH size the Intermediate-layer Cache (default:
+//   package macros); a smaller IC models a BRAM-constrained edge device.
 //   Constraints: PF x PV == PC (a layer output word is the next layer's input
 //   word) and the host must not push weights while a layer is computing.
 //==============================================================================
@@ -63,7 +86,9 @@ module bcnn_top #(
     parameter QUANT_BIAS_WIDTH = `QUANT_BIAS_WIDTH,
     parameter POOL_MODE_WIDTH = `POOL_MODE_WIDTH,
     parameter POOL_CNT_WIDTH = `POOL_CNT_WIDTH,
-    parameter VAR_OUT_WIDTH = 2*DATA_WIDTH
+    parameter VAR_OUT_WIDTH = 2*DATA_WIDTH,
+    parameter IC_RAM_DEPTH = `IC_RAM_DEPTH,
+    parameter IC_ADDR_WIDTH = `IC_ADDR_WIDTH
 )(
     input wire clk, rst_n,
 
@@ -112,6 +137,20 @@ module bcnn_top #(
     input wire load_seed,
     input wire [`LFSR_WIDTH-1:0] seed_in,
 
+    // UAMH Innovation 1: Uncertainty-Modulated Precision Storage
+    input wire umps_en,
+    input wire signed [`UMPS_THRESH_WIDTH-1:0] umps_thresh,
+
+    // UAMH Innovation 3: Uncertainty-Tagged Cache Lines
+    input wire utag_en,
+    input wire signed [DATA_WIDTH-1:0] utag_zero_thresh,
+    input wire [$clog2(PF*PV+1)-1:0] utag_high_count_th,
+
+    // UAMH Innovation 2: Closed-Loop Early-Exit Sample Throttling
+    input wire early_exit_en,
+    input wire [`EARLY_EXIT_THRESH_WIDTH-1:0] early_exit_thresh,
+    input wire [SAMPLE_CNT_WIDTH-1:0] early_exit_min_samples,
+
     // Bayesian reduction outputs (Stage 5)
     output wire [(PF*PV*DATA_WIDTH)-1:0] mean_prediction,
     output wire [(PF*PV*VAR_OUT_WIDTH)-1:0] uncertainty_score,
@@ -120,7 +159,23 @@ module bcnn_top #(
     // Layer egress (to DRAM / inspection)
     output wire [(PF*PV*DATA_WIDTH)-1:0] layer_features_out,
     output wire layer_features_valid,
-    output wire layer_done
+    output wire layer_done,
+
+    // UMPS telemetry (compression ratio = ic_lines_cached x PF x PV / ic_bytes_used)
+    output wire [IC_ADDR_WIDTH+1:0] ic_lines_cached,
+    output wire [IC_ADDR_WIDTH+$clog2(PF*PV):0] ic_bytes_used,
+
+    // U-Tagging spill egress and telemetry
+    output wire [(PF*PV*DATA_WIDTH)-1:0] ic_spill_data,
+    output wire ic_spill_valid,
+    output wire [IC_ADDR_WIDTH+1:0] high_u_cached_count,
+    output wire [IC_ADDR_WIDTH+1:0] low_u_bypassed_count,
+    output wire [`UTAG_WIDTH-1:0] current_line_u_tag,
+
+    // Early-exit telemetry
+    output wire early_exit_triggered,
+    output wire [SAMPLE_CNT_WIDTH-1:0] samples_executed,
+    output wire eval_pending
 );
 
     // Pipeline depth from a RAG read issue to the Stage 4 output:
@@ -173,11 +228,11 @@ module bcnn_top #(
 
     // Stage 5 wires
     wire s5_busy, s5_ic_write_en, s5_ic_read_en, s5_bypass, s5_mcd_en, s5_is_final;
+    wire s5_eval_pending;
     wire [SAMPLE_CNT_WIDTH-1:0] s5_sample_idx;
     wire [LAYER_CNT_WIDTH-1:0] s5_layer_idx;
     wire [(PF*PV*DATA_WIDTH)-1:0] replay_features;
     wire replay_valid, replay_mask_pop;
-    wire [`IC_ADDR_WIDTH:0] ic_word_count;
     wire ic_full;
 
     //--------------------------------------------------------------------------
@@ -209,7 +264,8 @@ module bcnn_top #(
                 S_LAYER: begin
                     if(!s5_busy) begin
                         state <= S_IDLE;
-                    end else if(!s5_ic_read_en || sampler_mask_valid) begin
+                    end else if(!s5_eval_pending && (!s5_ic_read_en || sampler_mask_valid)) begin
+                        // An early-exit decision pending blocks the next sample's layer
                         // Layer N-B+1 of samples 2..S is fed from the IC buffer
                         src_replay <= s5_ic_read_en;
                         replay_load_r <= s5_ic_read_en;
@@ -257,6 +313,7 @@ module bcnn_top #(
     end
 
     assign busy = (state != S_IDLE);
+    assign eval_pending = s5_eval_pending;
     assign layer_done = layer_done_r;
 
     //--------------------------------------------------------------------------
@@ -266,7 +323,9 @@ module bcnn_top #(
     wire [(PC*DATA_WIDTH)-1:0] ing_data = src_replay ? replay_features[(PC*DATA_WIDTH)-1:0] : dram_data_in;
     wire ic_rd_req = s1_dram_ready && src_replay;
 
-    assign dram_data_ready = s1_dram_ready && !src_replay;
+    // In a replay layer the DRAM bus only carries spilled lines back to Stage 5
+    wire s5_spill_req;
+    assign dram_data_ready = src_replay ? s5_spill_req : s1_dram_ready;
 
     //--------------------------------------------------------------------------
     // Weight reuse: one window of PF-filter weights is cached in the FIFO and
@@ -464,6 +523,8 @@ module bcnn_top #(
         .PV(PV),
         .LAYER_CNT_WIDTH(LAYER_CNT_WIDTH),
         .SAMPLE_CNT_WIDTH(SAMPLE_CNT_WIDTH),
+        .IC_RAM_DEPTH(IC_RAM_DEPTH),
+        .IC_ADDR_WIDTH(IC_ADDR_WIDTH),
         .VAR_OUT_WIDTH(VAR_OUT_WIDTH)
     ) u_stage5 (
         .clk(clk),
@@ -484,8 +545,28 @@ module bcnn_top #(
         .replay_mask_pop(replay_mask_pop),
         .replay_features(replay_features),
         .replay_valid(replay_valid),
-        .ic_word_count(ic_word_count),
+        .ic_word_count(ic_lines_cached),
+        .ic_byte_count(ic_bytes_used),
         .ic_full(ic_full),
+        .umps_en(umps_en),
+        .umps_thresh(umps_thresh),
+        .utag_en(utag_en),
+        .utag_zero_thresh(utag_zero_thresh),
+        .utag_high_count_th(utag_high_count_th),
+        .spill_features(ic_spill_data),
+        .spill_valid(ic_spill_valid),
+        .spill_req(s5_spill_req),
+        .spill_ret_features(dram_data_in[(PF*PV*DATA_WIDTH)-1:0]),
+        .spill_ret_valid(src_replay && dram_data_valid),
+        .high_u_cached_count(high_u_cached_count),
+        .low_u_bypassed_count(low_u_bypassed_count),
+        .current_line_u_tag(current_line_u_tag),
+        .early_exit_en(early_exit_en),
+        .early_exit_thresh(early_exit_thresh),
+        .early_exit_min_samples(early_exit_min_samples),
+        .eval_pending(s5_eval_pending),
+        .early_exit_triggered(early_exit_triggered),
+        .samples_executed(samples_executed),
         .sample_idx(s5_sample_idx),
         .layer_idx(s5_layer_idx),
         .busy(s5_busy),

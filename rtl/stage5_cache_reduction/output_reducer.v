@@ -15,12 +15,20 @@
 //   - sample_in         : PF x PV parallel INT8 final-layer outputs.
 //   - sample_idx        : Current MC sample index (1..S).
 //   - total_samples_S   : Number of samples S (>= 1, from mc_sample_controller).
+//   - early_exit_en     : UAMH Innovation 2 active for this inference (latched).
+//   - early_exit_thresh : Convergence tolerance epsilon for convergence_monitor.
+//   - early_exit_min_samples : Warm-up S_min before an early exit is allowed.
 //
 // Architectural Outputs:
 //   - mean_prediction   : PF x PV INT8 means, Mean[f] = Sum(x[f]) / S.
 //   - uncertainty_score : PF x PV unsigned variances (VAR_OUT_WIDTH bits each),
 //                         Var[f] = Sum(x[f]^2) / S - Mean[f]^2.
 //   - reduction_done    : High once results are valid; held until next clear.
+//   - sample_decided    : Early-exit decision for the current sample is ready
+//                         (level, cleared when the next sample arrives).
+//   - early_exit_trigger: Statistics converged; inference ends at this sample
+//                         (level, valid with sample_decided).
+//   - variance_delta    : Last max per-channel variance change (telemetry).
 //
 // Description:
 //   Each sample contributes one PF x PV vector. Per channel, a running sum and
@@ -30,6 +38,12 @@
 //   avoids PF x PV wide combinational dividers. The mean is truncated toward
 //   zero, which guarantees Mean^2 <= Sum(x^2)/S and hence a non-negative
 //   variance. Requires VAR_ACCUM_WIDTH > REDUCER_ACCUM_WIDTH.
+//   Early exit (early_exit_en = 1): the division runs after every sample, by the
+//   number of samples s seen so far, so the running statistics are always exact.
+//   convergence_monitor compares them with the previous pass; if it triggers,
+//   the results are final with s_actual = s, otherwise accumulation continues.
+//   The last sample (s = S) always finalises directly. With early_exit_en = 0
+//   the division only runs for sample S, exactly as in the baseline.
 //==============================================================================
 
 `include "bcnn_pkg.vh"
@@ -50,9 +64,17 @@ module output_reducer #(
     input wire [SAMPLE_CNT_WIDTH-1:0] sample_idx,
     input wire [SAMPLE_CNT_WIDTH-1:0] total_samples_S,
 
+    // UAMH Innovation 2: early exit
+    input wire early_exit_en,
+    input wire [`EARLY_EXIT_THRESH_WIDTH-1:0] early_exit_thresh,
+    input wire [SAMPLE_CNT_WIDTH-1:0] early_exit_min_samples,
+
     output wire [(PF*PV*DATA_WIDTH)-1:0] mean_prediction,
     output wire [(PF*PV*VAR_OUT_WIDTH)-1:0] uncertainty_score,
-    output reg reduction_done
+    output reg reduction_done,
+    output reg sample_decided,
+    output reg early_exit_trigger,
+    output wire [`EARLY_EXIT_THRESH_WIDTH-1:0] variance_delta
 );
 
     localparam ST_WIDTH = 3;
@@ -61,11 +83,35 @@ module output_reducer #(
     localparam [ST_WIDTH-1:0] RED_DIV = 2;
     localparam [ST_WIDTH-1:0] RED_FINAL = 3;
     localparam [ST_WIDTH-1:0] RED_DONE = 4;
+    localparam [ST_WIDTH-1:0] RED_EVAL = 5;
+    localparam [ST_WIDTH-1:0] RED_DECIDE = 6;
     localparam DIV_CNT_WIDTH = $clog2(VAR_ACCUM_WIDTH);
 
     reg [ST_WIDTH-1:0] state;
     reg [DIV_CNT_WIDTH-1:0] div_cnt;
     reg [SAMPLE_CNT_WIDTH-1:0] divisor;
+    reg last_sample;
+    wire monitor_trigger;
+
+    // Running statistics after each pass feed the convergence check
+    convergence_monitor #(
+        .PF(PF),
+        .PV(PV),
+        .SAMPLE_CNT_WIDTH(SAMPLE_CNT_WIDTH),
+        .VAR_OUT_WIDTH(VAR_OUT_WIDTH)
+    ) u_convergence_monitor (
+        .clk(clk),
+        .rst_n(rst_n),
+        .clear(clear),
+        .sample_valid(state == RED_EVAL),
+        .sample_idx(divisor),
+        .current_variance(uncertainty_score),
+        .early_exit_en(early_exit_en),
+        .early_exit_thresh(early_exit_thresh),
+        .min_samples(early_exit_min_samples),
+        .early_exit_trigger(monitor_trigger),
+        .variance_delta_out(variance_delta)
+    );
 
     // Shared control
     always @(posedge clk or negedge rst_n) begin
@@ -73,17 +119,27 @@ module output_reducer #(
             state <= RED_ACCUM;
             div_cnt <= {DIV_CNT_WIDTH{1'b0}};
             divisor <= {SAMPLE_CNT_WIDTH{1'b0}};
+            last_sample <= 1'b0;
             reduction_done <= 1'b0;
+            sample_decided <= 1'b0;
+            early_exit_trigger <= 1'b0;
         end else if(clear) begin
             state <= RED_ACCUM;
             reduction_done <= 1'b0;
+            sample_decided <= 1'b0;
+            early_exit_trigger <= 1'b0;
         end else begin
             case(state)
                 RED_ACCUM: begin
-                    // Last MC sample accumulated this cycle - start the 1/S normalisation
-                    if(sample_valid && (sample_idx == total_samples_S)) begin
-                        divisor <= total_samples_S;
-                        state <= RED_LOAD;
+                    // Normalise by the samples seen so far: only after sample S in the
+                    // baseline, after every sample when early exit is enabled
+                    if(sample_valid) begin
+                        sample_decided <= 1'b0;
+                        if((sample_idx == total_samples_S) || early_exit_en) begin
+                            divisor <= sample_idx;
+                            last_sample <= (sample_idx == total_samples_S);
+                            state <= RED_LOAD;
+                        end
                     end
                 end
                 RED_LOAD: begin
@@ -97,8 +153,26 @@ module output_reducer #(
                     end
                 end
                 RED_FINAL: begin
-                    reduction_done <= 1'b1;
-                    state <= RED_DONE;
+                    if(last_sample) begin
+                        reduction_done <= 1'b1;
+                        state <= RED_DONE;
+                    end else begin
+                        state <= RED_EVAL;
+                    end
+                end
+                RED_EVAL: begin
+                    // convergence_monitor registers its decision on this edge
+                    state <= RED_DECIDE;
+                end
+                RED_DECIDE: begin
+                    sample_decided <= 1'b1;
+                    if(monitor_trigger) begin
+                        early_exit_trigger <= 1'b1;
+                        reduction_done <= 1'b1;
+                        state <= RED_DONE;
+                    end else begin
+                        state <= RED_ACCUM;
+                    end
                 end
                 default: begin
                     // RED_DONE: hold results until the next clear
