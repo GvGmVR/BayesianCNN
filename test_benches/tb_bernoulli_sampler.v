@@ -39,6 +39,7 @@ module tb_bernoulli_sampler;
     always #2.27 clk = ~ clk;
 
     integer w,b,ones_count, total_bits,error_count;
+    reg [`PF-1:0] popped_word;
     real measured_prob;
 
     // Timeout
@@ -91,41 +92,44 @@ module tb_bernoulli_sampler;
         $display("[TEST 2 & 3 PASSED] FIFO filled to capacity. Backpressure verified (mask_full = 1).");
 
         // TEST CASE 4: Pop and Read Masks from FIFO
+        // FIFO is first-word-fall-through: read the head word, then pop it for exactly one cycle.
+        // Stimulus changes on the falling edge so the DUT samples stable inputs.
         $display("\n[TEST 4] Popping 5 mask words from FIFO for Stage 4...");
 
-        for (w  = 0;w<5;w=w+1) begin 
-            @(posedge clk);
-            mask_pop =1;
-        #1;
-        $display("  -> Popped Mask Word %0d: 0x%016X (Count Remaining: %d)", w, mask_out[63:0], mask_count);
-    
-        if(mask_out == {`PF{1'b0}})begin 
-            $display("[WARNING] Popped all-zero mask word (unlikely with valid LFSR).");
+        for (w=0;w<5;w=w+1) begin 
+            @(negedge clk);
+            while (mask_empty || !mask_valid) @(negedge clk);
+            popped_word = mask_out;
+            mask_pop = 1;
+            @(negedge clk);
+            mask_pop = 0;
+            $display("  -> Popped Mask Word %0d: 0x%016X (Count Remaining: %0d)", w, popped_word, mask_count);
+            if(popped_word == {`PF{1'b0}})begin 
+                $display("[WARNING] Popped all-zero mask word (unlikely with valid LFSR).");
             end
         end
-        mask_pop=0;
 
         $display("[TEST 4 PASSED] FIFO Pop interface verified.");
     
         // TEST CASE 5: Statistical Distribution Verification (p ~ 0.5)
-         $display("\n[TEST 5] Statistical Monte Carlo Test (Sampling 4,096 bits)...");
-         // Pop and evaluate 64 mask words = 64 * 64 = 4096 random bits
-         for (w=0;w<64;w=w+1) begin 
-            while(mask_empty) begin 
-                @(posedge clk);
-            end
-            @(posedge clk);
-            mask_pop =1;
-            @(posedge clk);
-            #1;
+        $display("\n[TEST 5] Statistical Monte Carlo Test (Sampling 4,096 bits)...");
+        // Pop and evaluate 64 mask words = 64 * 64 = 4096 random bits.
+        // The FIFO drains faster than the SIPO refills it (1 word / 64 cycles), so every
+        // pop waits for a valid word; an empty FIFO reads as 0 and must never be counted.
+        for (w=0;w<64;w=w+1) begin 
+            @(negedge clk);
+            while (mask_empty || !mask_valid) @(negedge clk);
+            popped_word = mask_out;
+            mask_pop = 1;
+            @(negedge clk);
+            mask_pop = 0;
             for (b=0;b<`PF;b=b+1)begin 
-                if(mask_out[b] == 1'b1) begin 
+                if(popped_word[b] == 1'b1) begin 
                     ones_count = ones_count + 1;    
                 end
                 total_bits = total_bits + 1;
             end
-            mask_pop=0;
-         end
+        end
 
         measured_prob = ones_count / (total_bits * 1.0);
         $display("  -> Total Bits Sampled: %d | Total 1s: %d", total_bits, ones_count);

@@ -92,6 +92,7 @@ module data_ingress_engine #(
         end else begin
             case(state)
                 STATE_IDLE: begin
+                    ingress_done <= 1'b0;
                     if(start_ingress)begin
                         state <= STATE_WRITE;
                         ingress_busy <= 1'b1;

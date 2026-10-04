@@ -13,6 +13,9 @@
 // Architectural Outputs:
 //   - Broadcasted PE data matrix (PF x PV x PC bytes).
 //   - Handshake status flags (ingress_done, window_done, layer_done).
+//   - re_b_valid / window_done are aligned with pe_data_out (BRAM latency).
+//   - read_issue / last_window are aligned with the read request, one cycle
+//     earlier, so the weight buffer (registered pop) lines up with the data.
 //
 // Description:
 //   Integrates Ingress DMA, RAG, Crossbar, Tree Fan-Out, and two sets of 
@@ -60,6 +63,8 @@ module smart_data_buffer #(
     output wire re_b_valid,
     output wire window_done,
     output wire layer_done,
+    output wire read_issue,
+    output wire last_window,
     output wire [(PF*PV*PC*DATA_WIDTH)-1:0] pe_data_out
 );
 
@@ -72,6 +77,11 @@ module smart_data_buffer #(
     // RAG wires
     wire [ADDR_WIDTH-1:0] rag_addr_b;
     wire rag_re_b;
+    wire rag_window_done;
+
+    // Delay read strobes by the BRAM read latency so they align with dout_b
+    reg rag_re_b_d1;
+    reg rag_window_done_d1;
 
     // RAM read data bus bank wires
     wire [(PV*PC*DATA_WIDTH)-1:0] raw_ram_out;
@@ -107,7 +117,19 @@ module smart_data_buffer #(
     assign pong_re_b = (ping_pong_sel == 1'b0) ? rag_re_b   : 1'b0;
 
     assign raw_ram_out = (ping_pong_sel == 1'b1) ? ping_dout_b : pong_dout_b;
-    assign re_b_valid = rag_re_b;
+    assign re_b_valid = rag_re_b_d1;
+    assign window_done = rag_window_done_d1;
+    assign read_issue = rag_re_b;
+
+    always @(posedge clk or negedge rst_n) begin
+        if(!rst_n) begin
+            rag_re_b_d1 <= 1'b0;
+            rag_window_done_d1 <= 1'b0;
+        end else begin
+            rag_re_b_d1 <= rag_re_b;
+            rag_window_done_d1 <= rag_window_done;
+        end
+    end
 
 
     // Data ingress engine - Port A write side
@@ -160,7 +182,8 @@ module smart_data_buffer #(
         .stride(stride),
         .read_addr(rag_addr_b),
         .re_b(rag_re_b),
-        .window_done(window_done),
+        .window_done(rag_window_done),
+        .last_window(last_window),
         .layer_done(layer_done)
     );
 
@@ -211,7 +234,7 @@ module smart_data_buffer #(
     ) u_crossbar (
         .clk(clk),
         .rst_n(rst_n),
-        .enable(rag_re_b),
+        .enable(rag_re_b_d1),
         .raw_bank_data(raw_ram_out),
         .aligned_data(aligned_ram_out)
     );

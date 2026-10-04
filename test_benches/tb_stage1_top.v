@@ -164,10 +164,11 @@ module tb_stage_1_top;
         start_compute = 0;
 
         //wait for first valid read
-        @(posedge clk);
-        while(!re_b_valid) @(posedge clk);
+        // Sample on the falling edge so the first valid read is not missed
+        @(negedge clk);
+        while(!re_b_valid) @(negedge clk);
 
-        #1; // Check first read cycle: Pixel (0,0), Channel 0 should be 0
+        // Check first read cycle: Pixel (0,0), Channel 0 should be 0
         if(pe_data_out[7:0]!==8'd0)begin 
             $display("[ERROR] Expected Pixel (0,0) Ch 0 = 0, Got = %d", pe_data_out[7:0]);
             error_count = error_count + 1;

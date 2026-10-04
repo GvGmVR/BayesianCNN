@@ -73,6 +73,17 @@ module processing_unit #(
     wire signed [DATA_WIDTH-1:0] quant_val;
     wire quant_valid;
 
+    // ReLU is registered, so its valid is delayed by one cycle to stay aligned
+    reg relu_valid;
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            relu_valid <= 1'b0;
+        end else begin
+            relu_valid <= quant_valid;
+        end
+    end
+
     // 1. MAC Unit: 64 Multipliers + 6-level Adder Tree
     mac_unit #(
         .DATA_WIDTH(DATA_WIDTH),
@@ -134,6 +145,6 @@ module processing_unit #(
         .data_out(feature_out)
     );
 
-    assign feature_valid = quant_valid;
+    assign feature_valid = relu_valid;
 
 endmodule

@@ -14,6 +14,8 @@
 // Architectural Outputs:
 //   - BRAM Read Bus: Row address and read enable signal for all 64 RAM banks.
 //   - Synchronization: Window Done (end of KHxKW patch) and Layer Done pulses.
+//   - last_window: High while the reads of the final output window are issued.
+//   read_addr, re_b, window_done and last_window all describe the same read.
 //
 // Description:
 //   Uses the common memory map M(l,h,w,c) to read complete 64-channel sliding
@@ -45,6 +47,7 @@ module read_addr_gen#(
     output reg [ADDR_WIDTH-1:0] read_addr,
     output reg re_b,
     output reg window_done,
+    output reg last_window,
     output reg layer_done
 );
 
@@ -88,12 +91,14 @@ module read_addr_gen#(
             h_cnt <= {DIM_WIDTH{1'b0}};
             re_b <= 1'b0;
             window_done <= 1'b0;
+            last_window <= 1'b0;
             layer_done <= 1'b0;
         end else begin 
             case(state)
                 STATE_IDLE: begin 
                     layer_done<=1'b0;
                     window_done<=1'b0;
+                    last_window<=1'b0;
                     re_b <= 1'b0;
                     if(start_layer) begin
                         c_tile_cnt <= {TILE_CNT_WIDTH{1'b0}};
@@ -103,14 +108,15 @@ module read_addr_gen#(
                         kl_cnt <= {KERNEL_DIM_WIDTH{1'b0}};
                         h_cnt <= {DIM_WIDTH{1'b0}};
                         state <= STATE_READ;
-                        re_b <= 1'b1;
                     end
                 end
 
                 STATE_READ: begin 
+                    // One read per cycle; flags below belong to this same read
                     read_addr <=calc_read_addr;
                     re_b <= 1'b1;
-                    window_done <= 1'b1;
+                    window_done <= 1'b0;
+                    last_window <= (w_tile_cnt == (W_tiles-1'b1)) && (h_cnt == (H-1'b1));
 
                     if(c_tile_cnt == (C_tiles -1'b1))begin 
                         c_tile_cnt <= {TILE_CNT_WIDTH{1'b0}};
@@ -126,7 +132,6 @@ module read_addr_gen#(
                                         if(h_cnt == (H-1'b1))begin 
                                             h_cnt <={DIM_WIDTH{1'b0}};
                                             state <= STATE_DONE;
-                                            re_b <= 1'b0;
                                             layer_done <= 1'b1;
                                         end else begin 
                                             h_cnt <= h_cnt + 1'b1;
@@ -151,6 +156,7 @@ module read_addr_gen#(
                 STATE_DONE: begin 
                     re_b <=1'b0;
                     window_done <= 1'b0;
+                    last_window <= 1'b0;
                     layer_done <=1'b0;
                     state <= STATE_IDLE;
                 end

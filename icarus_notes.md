@@ -40,3 +40,9 @@ iverilog -I rtl -g2005-sv -o sim/stage5/stage5_sim.out rtl/stage5_cache_reductio
 vvp sim/stage5/stage5_sim.out
 
 gtkwave sim/stage4/stage5_simulation.vcd
+
+iverilog -I rtl -g2005-sv -o sim/bcnn_top_sim.out rtl/stage1_buffers/ram_bank.v rtl/stage1_buffers/tree_fanout.v rtl/stage1_buffers/crossbar_switch.v rtl/stage1_buffers/read_addr_gen.v rtl/stage1_buffers/data_ingress_engine.v rtl/stage1_buffers/weight_fifo.v rtl/stage1_buffers/smart_data_buffer.v rtl/stage1_buffers/smart_weight_buffer.v rtl/stage2_sampler/lfsr_128bit.v rtl/stage2_sampler/sipo_shift_reg.v rtl/stage2_sampler/mask_fifo.v rtl/stage2_sampler/bernoulli_sampler.v rtl/stage3_pe_array/multiplier_array.v rtl/stage3_pe_array/adder_tree.v rtl/stage3_pe_array/mac_unit.v rtl/stage3_pe_array/accumulator_32bit.v rtl/stage3_pe_array/linear_quantizer.v rtl/stage3_pe_array/relu_unit.v rtl/stage3_pe_array/processing_unit.v rtl/stage3_pe_array/processing_engine.v rtl/stage4_functional/sc_addition_unit.v rtl/stage4_functional/pooling_unit_2d.v rtl/stage4_functional/dropout_engine.v rtl/stage4_functional/functional_engine.v rtl/stage5_cache_reduction/ic_buffer.v rtl/stage5_cache_reduction/mc_sample_controller.v rtl/stage5_cache_reduction/output_reducer.v rtl/stage5_cache_reduction/cache_reduction_engine.v rtl/bcnn_top.v test_benches/tb_bcnn_top.v
+
+vvp sim/bcnn_top_sim.out
+
+gtkwave sim/bcnn_top_simulation.vcd
