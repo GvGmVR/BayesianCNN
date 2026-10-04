@@ -59,4 +59,14 @@
 `define POOL_WIN_SIZE 4    // 2x2 spatial pooling window (4 pixels)
 `define POOL_CNT_WIDTH 2   // $clog2(POOL_WIN_SIZE) = 2 bits (0 to 3)
 
+// Stage 5: Cache Reduction & Uncertainty Parameters
+
+`define MAX_SAMPLES 100         // Maximum Monte Carlo samples S
+`define SAMPLE_CNT_WIDTH 7           // $clog2(MAX_SAMPLES) (0 to 100)
+`define LAYER_CNT_WIDTH 6           // Supports up to 64 layers N
+`define IC_RAM_DEPTH 1024        // Depth of Intermediate-Layer Cache BRAM
+`define IC_ADDR_WIDTH 10          // $clog2(IC_RAM_DEPTH)
+`define REDUCER_ACCUM_WIDTH 24          // Accumulator width for S samples: DATA_WIDTH + SAMPLE_CNT_WIDTH + margin
+`define VAR_ACCUM_WIDTH 32          // Variance sum-of-squares accumulator width
+
 `endif

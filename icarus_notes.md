@@ -34,3 +34,9 @@ iverilog -I rtl -g2005-sv -o sim/stage4/stage4_sim.out rtl/stage2_sampler/lfsr_1
 vvp sim/stage4/stage4_sim.out
 
 gtkwave sim/stage4/stage4_simulation.vcd
+
+iverilog -I rtl -g2005-sv -o sim/stage5/stage5_sim.out rtl/stage5_cache_reduction/ic_buffer.v rtl/stage5_cache_reduction/mc_sample_controller.v rtl/stage5_cache_reduction/output_reducer.v rtl/stage5_cache_reduction/cache_reduction_engine.v rtl/stage4_functional/dropout_engine.v test_benches/tb_cache_reduction_engine.v
+
+vvp sim/stage5/stage5_sim.out
+
+gtkwave sim/stage4/stage5_simulation.vcd

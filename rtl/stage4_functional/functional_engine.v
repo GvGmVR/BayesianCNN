@@ -25,6 +25,8 @@
 //   - mask_pop            : 1-cycle pop strobe sent to Stage 2 Sampler FIFO.
 //   - stage4_features_out : PF x PV parallel INT8 final processed features to Stage 5 / DRAM.
 //   - stage4_valid_out    : 1-cycle strobe indicating stage4_features_out is valid.
+//   - premask_features_out: Pre-dropout tap (pooling output) for the Stage 5 IC buffer.
+//   - premask_valid_out   : 1-cycle strobe indicating premask_features_out is valid.
 //
 // Description:
 //   Chains sc_addition_unit -> pooling_unit_2d -> dropout_engine into a 
@@ -57,7 +59,11 @@ module functional_engine #(
     output wire mask_pop,
 
     output wire [(PF * PV * DATA_WIDTH)-1:0] stage4_features_out,
-    output wire stage4_valid_out
+    output wire stage4_valid_out,
+
+    // Pre-dropout tap: IC caches layer N-B before MCD so every MC sample can re-mask it
+    output wire [(PF * PV * DATA_WIDTH)-1:0] premask_features_out,
+    output wire premask_valid_out
 );
 
     wire [(PF*PV*DATA_WIDTH)-1:0] sc_out_bus;
@@ -101,6 +107,9 @@ module functional_engine #(
         .pooled_features(pool_out_bus),
         .valid_out(pool_valid)
     );
+
+    assign premask_features_out = pool_out_bus;
+    assign premask_valid_out = pool_valid;
 
     // 3. Dropout Engine (Applies Stage 2 Bernoulli Mask)
     dropout_engine #(
